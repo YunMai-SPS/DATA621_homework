@@ -1,0 +1,1523 @@
+---
+title: "DATA621 - Business Analytics and Data Mining: Assignment_1"
+author: "Yun Mai"
+date: "February 14, 2018"
+output:  
+    rmarkdown::html_document:
+    theme: lumen
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Overview
+
+### In this homework assignment, you will explore, analyze and model a data set containing approximately 2200 records. Each record represents a professional baseball team from the years 1871 to 2006 inclusive. Each record has the performance of the team for the given year, with all of the statistics adjusted to match the performance of a 162 game season.
+
+### Your objective is to build a multiple linear regression model on the training data to predict the number of wins for the team. You can only use the variables given to you (or variables that you derive from the variables provided). Below is a short description of the variables of interest in the data set:
+
+
+## Code for model-1,2,5 From Gurpreet
+
+## Homework 1 - MoneyBall
+
+
+#### Libraries
+
+```{r}
+suppressWarnings(library(data.table))
+suppressWarnings(library(knitr))
+suppressWarnings(library(pastecs))
+suppressWarnings(library(psych))
+suppressWarnings(library(Hmisc))
+suppressWarnings(library(reshape))
+suppressWarnings(library(corrplot))
+suppressWarnings(library(MASS))
+suppressWarnings(library(dplyr))
+suppressWarnings(library(ggplot2))
+```
+
+### Data Exploration
+
+```{r}
+train_1 <-fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/data/moneyball-training-data.csv")
+test <-fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/data/moneyball-evaluation-data.csv")
+ref <- fread("https://raw.githubusercontent.com/gpsingh12/Data-621/master/data/ref_variables.csv")
+```
+
+##### a. Data Description
+
+
+The dataset consists of 17 variables and 2276 rows. Column INDEX is assigning a record number to each entry in the dataset and will be excluded from the analysis. The structure of data is integer, we will proceed with the analysis with the structure unchanged.The reference file describes the variables and their impact on the wins.
+
+```{r}
+
+dim(train_1)
+str(train_1)
+## integer values
+kable(head(train_1))
+kable(ref)
+```
+
+
+Variable TARGET_WINS is our dependent variable and remaining 15 variables are the independent variables that will be analyzed for prediction to use in our models.
+
+```{r}
+miss_names <- setdiff(colnames(train_1),colnames(test))
+
+train_1 <- train_1[,c(2:17)]
+test <- test[,c(2:16)]
+
+```
+
+
+
+
+##### b. Data Summary/Statistics
+
+The next step in the process is to summarize our data. The summary points for all 16 variables are described below.
+
+```{r}
+## summary of the data set
+stat.desc(train_1)
+psych::describe(train_1)
+
+
+```
+
+
+```{r}
+train_1 <- as.data.frame((train_1))
+
+par(mfrow=c(3, 3))
+colnames <- dimnames(train_1)[[2]]
+
+  for(col in 2:ncol(train_1)) {
+
+    d <- density(na.omit(train_1[,col]))
+   #d <- qqnorm(na.omit(train_1[,col]))
+    plot(d, type="n", main=colnames[col])
+    polygon(d, col="red", border="gray")
+  }
+
+
+
+
+```
+
+
+
+
+
+##### c. Data Outliers 
+ We will detect the outliers using box-plot for the variables. From the box-plot for all the variables, we see that variables TEAM_PITCHING_H and TEAM_PITCHING_SO contains the outliers. We will handle the outliers in the data preparation section.
+ 
+```{r}
+
+m1 <- melt(as.data.frame(train_1))
+
+ggplot(m1,aes(x = variable,y = value)) + facet_wrap(~variable) + geom_boxplot()
+
+```
+
+
+#### d. Missing Values (NA's)
+Defining the summary of data, we included the number of NA's in all the variables. We will create data frame for all tbe NA's in the dataset. The variables with missing values are listed.
+
+```{r}
+## Checking :for NA's
+
+train_1_na<- data.frame(colSums(is.na(train_1)))
+train_1_na
+
+test_na<- data.frame(colSums(is.na(test)))
+test_na
+
+```
+
+
+
+#### e. Collinearity 
+
+Based on the analysis, two variables TEAM_BATTING_HR and TEAM_PITCHING_HR were collinear.
+
+```{r}
+
+correl_train <- as.data.frame(round(cor(train_1, use = "pair"), 2))
+coll <- which(correl_train> 0.8 & correl_train<1, arr.ind=TRUE)
+coll
+
+# cor_matrix<-cor(train_1[,1],train_1[,2:16])
+# na.omit(cor_matrix)
+
+
+```
+
+The results from Data Exploration sections will be used for next step in the analysis, preparing our data for models.
+
+
+##2. Data Preparation
+
+####a. Handle Outliers in the dataset
+
+```{r}
+replaceOutliers = function(x) { 
+
+    quantiles <- quantile( x, c(0.5,.95 ) )
+    x[ x < quantiles[1] ] <- quantiles[1]
+   
+    x[ x > quantiles[2] ] <- quantiles[2]
+    return(x)
+}
+   
+train_1$TEAM_PITCHING_H <- replaceOutliers(train_1$TEAM_PITCHING_H)
+test$TEAM_PITCHING_H <- replaceOutliers(test$TEAM_PITCHING_H)
+```
+
+
+
+
+####b. Handling NA's
+1. The variable TEAM_BATTING_HBP has 2085 NA's (almost 92% of the data). Including the variable in the analysis might not be the best approach. In addition, imputation of the variables with large percentage of NA's might not be an effective way to handle NA's. We will drop the variable from analysis.
+The variable TEAM_BASERUN_CS has 34% missing values, we will remove the varible from the analusis. The remaining varibles with missing values will be treated by median imputation.
+
+
+```{r}
+train_1 <- train_1[,-c(9:10)]
+test <- test[,-c(8:9)]
+
+train_1$TEAM_PITCHING_SO[is.na(train_1$TEAM_PITCHING_SO)] <- median(train_1$TEAM_PITCHING_SO, na.rm = TRUE)
+train_1$TEAM_BATTING_SO[is.na(train_1$TEAM_BATTING_SO)] <- median(train_1$TEAM_BATTING_SO, na.rm = TRUE)
+train_1$TEAM_BASERUN_SB[is.na(train_1$TEAM_BASERUN_SB)] <- median(train_1$TEAM_BASERUN_SB, na.rm = TRUE)
+train_1$TEAM_FIELDING_DP[is.na(train_1$TEAM_FIELDING_DP)] <- median(train_1$TEAM_FIELDING_DP, na.rm = TRUE)
+
+
+
+
+test$TEAM_PITCHING_SO[is.na(test$TEAM_PITCHING_SO)] <- median(test$TEAM_PITCHING_SO, na.rm = TRUE)
+test$TEAM_BATTING_SO[is.na(test$TEAM_BATTING_SO)] <- median(test$TEAM_BATTING_SO, na.rm = TRUE)
+test$TEAM_BASERUN_SB[is.na(test$TEAM_BASERUN_SB)] <- median(test$TEAM_BASERUN_SB, na.rm = TRUE)
+test$TEAM_FIELDING_DP[is.na(test$TEAM_FIELDING_DP)] <- median(test$TEAM_FIELDING_DP, na.rm = TRUE)
+```
+
+
+####c. Collinearity
+The variables TEAM_BATTING_HR and TEAM_PITCHING_HR are collinear with strong correlation of 97%. We will exclude the variable TEAM_PITCHING_HR to handle collinearity.
+
+Data Preparation section leads us in the removal of three variables from analysis. We will move forward with remaining variables for building the models.
+
+####d. Transforming the variables
+A closer look at the density plots form data exploration section reveals that the variables TEAM_BATTING_HR, TEAM_PITCHING_HR, TEAM_BATTING_SO and TEAM_PITCHING_SO can not be assumed normal.
+Variable TEAM_PITCHING_HR was removed due to multicollinearity. We will transform the remaining three variables for normality assumption. The variables will be transformed using log transformations.
+
+```{r}
+train_1_t <- train_1
+train_1_t$TEAM_BATTING_HR_tr <- log(train_1_t$TEAM_BATTING_HR +1)
+train_1_t$TEAM_BATTING_SO_tr <- log(train_1_t$TEAM_BATTING_SO +1)
+train_1_t$TEAM_PITCHING_SO_tr <- log(train_1_t$TEAM_PITCHING_SO +1)
+
+
+test_t<- test
+test_t$TEAM_BATTING_HR_tr <- log(test_t$TEAM_BATTING_HR +1)
+test_t$TEAM_BATTING_SO_tr <- log(test_t$TEAM_BATTING_SO +1)
+test_t$TEAM_PITCHING_SO_tr <- log(test_t$TEAM_PITCHING_SO +1)
+
+```
+
+
+
+
+###3. Building the Models
+
+
+
+
+
+
+
+
+#### Model1
+
+Backward Elimination
+
+```{r}
+model1 <- lm(TARGET_WINS~.,data=train_1)
+summary(model1)
+
+
+model1 <-update(model1, .~. -TEAM_PITCHING_HR,data=train_1)
+summary(model1)
+
+
+model1 <-update(model1, .~. -TEAM_BATTING_BB,data=train_1)
+summary(model1)
+
+stepb<- stepAIC(model1,direction="backward", trace=F)
+stepb$anova
+
+```
+
+
+```{r}
+par(mfrow=c(2,2 ))
+plot(model1)
+```
+
+#### Model 2
+```{r}
+
+
+
+
+model2 <- step(lm(TARGET_WINS~ 1, data=train_1), direction='forward', scope=~ TEAM_BATTING_H + TEAM_FIELDING_E + TEAM_BASERUN_SB + TEAM_FIELDING_DP + TEAM_PITCHING_HR + TEAM_BATTING_3B + 
+    TEAM_BATTING_BB + TEAM_BATTING_2B + TEAM_PITCHING_SO + TEAM_BATTING_SO + 
+    TEAM_PITCHING_H + TEAM_BATTING_HR)
+summary(model2)
+
+```
+
+
+
+`
+
+### Model 3
+The correlation matrix will be used to select the correlation of the independent variables with dependent variables to select the variables for our model. The transformed variables will also be included.
+
+```{r}
+cor(train_1_t[,1], train_1_t[,2:17])
+```
+
+Based on the correlation matrix, we will pick TEAM_BATTING_H, TEAM_BATTING_2B,TEAM_BATTING_HR_tr as our independent variables for prediction.
+
+
+
+
+```{r}
+model3 <- lm(TARGET_WINS~TEAM_BATTING_H+TEAM_BATTING_2B+TEAM_BATTING_HR_tr,data=train_1_t)
+summary(model3)
+
+
+```
+
+
+
+```{r}
+#ggplot(model3, aes(x = .fitted, y = .resid)) + geom_point() +geom_hline(yintercept=0)
+par(mfrow=c(2,2 ))
+plot(model3)
+```
+
+
+
+###4. Model selection
+
+BoxCox
+```{r}
+ m<- lm(TARGET_WINS~TEAM_BATTING_H+TEAM_BATTING_2B+TEAM_BATTING_HR_tr,data=train_1_t)
+#box <- boxcox(train_1$TARGET_WINS~1)
+# # 
+ #b<- MASS::boxcox(m)
+# lam <- b$x[which(b$y==max(b$y))]
+# lam 
+# # 
+# model4 <- lm((TARGET_WINS)^(1.25) ~.,data=train_1)
+# summary(model4)
+```
+
+####4. Model selection:
+
+AIC value:
+```{r}
+#AIC(model1,model2,model3,model4)
+```
+
+Adj-Rsq
+
+```{r}
+arsq_m1 <-summary(model1)$adj.r.squared
+arsq_m2 <-summary(model2)$adj.r.squared
+arsq_m3 <-summary(model3)$adj.r.squared
+#arsq_m4 <-summary(model4)$adj.r.squared
+#comp<- c(arsq_m1,arsq_m2,arsq_m3,arsq_m4)
+#kable(comp)
+```
+```{r}
+rse_m1 <- 13.08
+rse_m2 <- 13.07
+rse_m3 <- 14.17
+#rse_m4 <- 41.8
+
+
+```
+
+
+
+Residual-Plot
+```{r}
+
+par(mfrow=c(4, 4))
+plot(model1)
+plot(model2)
+plot(model3)
+#plot(model4)
+
+
+
+```
+
+
+###5. Test Model
+
+```{r}
+predicted <- predict(model1,data=test)
+test$TARGET_WINS <- predicted
+
+
+```
+
+#### Reference
+
+
+
+
+##### https://www.statmethods.net/stats/descriptives.html
+##### https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4842399/
+
+##### http://flowingdata.com/2012/05/15/how-to-visualize-and-compare-distributions/
+##### Zeros https://stats.stackexchange.com/questions/1444/how-should-i-transform-non-negative-data-including-zeros
+
+
+
+
+## Code for model -3,4,6,7,8 from Yun
+
+```{r,echo=F}
+suppressMessages(suppressWarnings(library(knitr)))
+suppressMessages(suppressWarnings(library(ggplot2)))
+suppressMessages(suppressWarnings(library(kableExtra)))
+suppressMessages(suppressWarnings(library(formattable)))
+suppressMessages(suppressWarnings(library(dplyr)))
+
+#install.packages('prettydoc')
+
+```
+
+
+```{r,echo=F}
+(var_tb <- data.frame(c('INDEX','TARGET_WINS','TEAM_BATTING_H','TEAM_BATTING_2B','TEAM_BATTING_3B','TEAM_BATTING_HR', 'TEAM_BATTING_BB', 'TEAM_BATTING_HBP', 'TEAM_BATTING_SO', 'TEAM_BASERUN_SB','TEAM_BASERUN_CS','TEAM_FIELDING_E','TEAM_FIELDING_DP','TEAM_PITCHING_BB','TEAM_PITCHING_H','TEAM_PITCHING_HR','TEAM_PITCHING_SO'),c('Identification Variable (do not use) ','Number of wins','Base Hits by batters (1B,2B,3B,HR)','Doubles by batters (2B)', 'Triples by batters (3B)','Homeruns by batters (4B)', 'Walks by batters', 'Batters hit by pitch (get a free base)','Strikeouts by batters', 'Stolen bases','Caught stealing', 'Errors','Double Plays', 'Walks allowed', 'Hits allowed', 'Homeruns allowed','Strikeouts by pitchers'),c('None','','Positive Impact on Wins','Positive Impact on Wins', 'Positive Impact on Wins', 'Positive Impact on Wins','Positive Impact on Wins', 'Positive Impact on Wins', 'Negative Impact on Wins', 'Positive Impact on Wins', 'Negative Impact on Wins', 'Negative Impact on Wins', 'Positive Impact on Wins', 'Negative Impact on Wins','Negative Impact on Wins', 'Negative Impact on Wins','Positive Impact on Wins')))
+
+colnames(var_tb) <- c('VARIABLE NAME', 'DEFINITION', 'THEORETICAL EFFECT')
+kable(var_tb)
+```
+
+
+
+
+### 1. DATA EXPLORATION
+
+Describe the size and the variables in the moneyball training data set. Consider that too much detail will cause a manager to lose interest while too little detail will make the manager consider that you aren't doing your job. Some suggestions are given below. Please do NOT treat this as a check list of things to do to complete the assignment. You should have your own thoughts on what to tell the boss. These are just ideas.
+
+a. Mean / Standard Deviation / Median
+
+b. Bar Chart or Box Plot of the data
+
+c. Is the data correlated to the target variable (or to other variables?)
+
+d. Are any of the variables missing and need to be imputed "fixed"?
+
+```{r}
+train <- read.csv("https://raw.githubusercontent.com/YunMai-SPS/DATA621_homework/master/data621_assignment1/moneyball-training-data.csv")
+
+test <- read.csv("https://raw.githubusercontent.com/YunMai-SPS/DATA621_homework/master/data621_assignment1/moneyball-evaluation-data.csv")
+```
+
+1.1 Summarizing the dataset
+
+Table 2 below, we can see the sample size of each variables, the missing data, the range of the value of each variable
+
+```{r}
+suppressMessages(suppressWarnings(library(pastecs)))
+options(scipen = 100)
+options(digits = 2)
+kable(stat.desc(train[,-1]))
+
+kable(stat.desc(train[,-1])[,1:8], "html") %>%
+  kable_styling(bootstrap_options = c("bordered", "hover", "condensed"))
+
+kable(stat.desc(train[,-1])[,9:16], "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+```{r}
+par(cex.axis=0.7, cex.lab=1, las = 1,mar=c(2,10,2,1)+.1)
+boxplot(train[,-1],horizontal = T)
+
+```
+
+```{r}
+par(cex.axis=0.7, cex.lab=1, las = 1,mar=c(2,10,2,1)+.1)
+boxplot(train[,-which(names(train) %in% c("INDEX","TEAM_PITCHING_H","TEAM_PITCHING_BB", "TEAM_PITCHING_SO", "TEAM_FIELDING_E","TEAM_BATTING_H"))],horizontal = T)
+```
+
+
+```{r}
+par(mfrow=c(3,3))
+for(i in 2:17){
+  hist(train[,i], probability = T, xlab = '', main = colnames(train)[i])
+  d <- density(train[,i],na.rm= T)
+  lines(d,col = 'red')
+}
+
+```
+
+
+TEAM_PITCHING_E, TEAM_PITCHING_DP are corelated with target variable.
+
+1.Missing data.
+check what persentage of data are missing in features and records. Usually a safe maximum threshold is 5% of the total for large datasets. So we will check whether the missing data for either predictor variables or samples/records is more than 5%.
+
+```{r}
+pMiss <- function(x){(sum(is.null(x))+sum(is.na(x)))/length(x)*100}
+miss_feature <- as.data.frame(apply(train[-1],2,pMiss))
+miss_feature_df <- miss_feature
+miss_feature_df$predictors <- as.numeric(t(stat.desc(train[,-1])[3,]))
+miss_feature_df$missing_values <- rownames(miss_feature)
+miss_feature_df <- miss_feature_df[,3:1]
+colnames(miss_feature_df)<- c('predictors','missing_values', 'missing_values(%)')
+
+  
+kable(miss_feature_df)
+kable(filter(miss_feature_df, miss_feature_df[,'missing_values(%)']!=0 ), "html") %>%
+  kable_styling(bootstrap_options = c("striped", "bordered", "hover", "condensed"),full_width = F)
+
+
+cat("The variables missed more than 5% datapoints are:",paste(rownames(miss_feature)[which(miss_feature > 5)],collapse = ','))
+cat("\n")
+
+```
+
+We see that variables TEAM_BASERUN_SB,TEAM_BASERUN_CS,TEAM_BATTING_HBP,TEAM_FIELDING_DP missed more than 5% data points. Since we can not get more measurements when doing the regression analysis, we may consider drop these features. For now we will only drop TEAM_BATTING_HBP which missed 92% data points. We will decide whether to drop the three other variables later after checking whether they have significance in linear regression model.
+
+
+
+
+```{r}
+suppressMessages(suppressWarnings(library(VIM)))
+
+aggr_plot <- aggr(train[,-1], col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(train[,-1]), cex.axis=.46, gap=3, ylab=c("Histogram of missing data","Pattern"))
+```
+
+
+The plot show that almost 8% of the samples are not missing any information, 56% samples are missing the TEAM_BATTING_HBP value. TEAM_BASERUN_CS, TEAM_FIELDING_DP, TEAM_BASERUN_SB, TEAM_BATTING_SO, and TEAM_PITCHING_SO show different missing patterns. 
+
+####collinearity 
+
+```{r}
+# Plot a correlation graph
+suppressMessages(suppressWarnings(library(corrplot)))
+
+# calculate Pearson correlation between predictors.
+traincor <- cor(train[,-1],use = "na.or.complete")
+
+corrplot(traincor, method = "number",number.cex = .57)
+#corrplot.mixed(traincor, lower.col = "black", number.cex = .7)
+```
+
+It is very interesting to see that base hits, homeruns, walks and strikeouts from the batting team and those from the pitching teams formed highly correlated pairs. So we can omit the redundent variables but only keep those data from the batting team."TEAM_PITCHING_H","TEAM_PITCHING_HR","TEAM_PITCHING_BB" and "TEAM_PITCHING_SO" will be removed because of the collinearities.
+
+
+
+Unidentifiability will occur when X is not of full rank-when its columns are linearly
+dependent. So we have to identify those variables have linear repaltionships.
+
+We assumed that the errors $\epsilon$ are independent and identically distributed with mean 0 and variance $\sigma^2$. linear combinations of normally distributed values are also normal, since y=
+
+Test of all the predictors.Are any of the predictors useful in predicting the response?
+
+
+```{r,eval=F}
+linear_train <- lm(TARGET_WINS ~  TEAM_BATTING_H+TEAM_BATTING_2B+  
+TEAM_BATTING_3B+TEAM_BATTING_HR+TEAM_BATTING_BB+TEAM_BATTING_HBP+   
+TEAM_BATTING_SO+TEAM_BASERUN_SB+TEAM_BASERUN_CS+TEAM_FIELDING_E+  
+TEAM_FIELDING_DP+TEAM_PITCHING_BB+TEAM_PITCHING_H+TEAM_PITCHING_HR+ 
+TEAM_PITCHING_SO,data=train,na.action=na.exclude)
+summary(linear_train)
+```
+
+
+
+From the table, we can see that no p-value was given to TEAM_BATTING_HBP due to this variable has too many missing data points. We also see that only two predictors TEAM_FIELDING_E and TEAM_FIELDING_DP, with a p-value 0.000051 and 0.003494	respectively, are useful in building the model. It is very unlikely that all other predictors have no significance in the model. We should step back to investigate the possibility of nonlinear transformations of the variables and of outliers which may obscure the relationship. 
+
+
+
+
+
+### 2. DATA PREPARATION
+
+Describe how you have transformed the data by changing the original variables or creating new variables. If you did transform the data or create new variables, discuss why you did this. Here are some possible transformations.
+
+a. Fix missing values (maybe with a Mean or Median value)
+
+b. Create flags to suggest if a variable was missing
+
+c. Transform data by putting it into buckets
+
+d. Mathematical transforms such as log or square root (or use Box-Cox)
+
+e. Combine variables (such as ratios or adding or multiplying) to create new variables 
+
+
+
+remove predictor variables, impute the missing values , create a new derived variable, remove outliers, transform variables (impute values for the remaining variables that had missing values (NA's))(remove sampes that contained clearly egregious outlier values for particular variables. )
+
+
+#### 2.1 Remove predictor variables
+
+TEAM_BATTING_HBP: Too many missing data points(92%).
+
+TEAM_PITCHING_H,TEAM_PITCHING_HR,TEAM_PITCHING_BB and TEAM_PITCHING_SO will be removed from the data because of the collinearities.
+
+TEAM_BASERUN_CS: Cause stolen data is highly related (0.62) to stolen base (TEAM_BASERUN_SB) data. Moreover, this vairable missed 33.9% data points. But this variable will be added back in one of the models later for generating new variable.
+
+TEAM_FIELDING_DP: We will keep this variable because it is important to building the modle (p-value<0.05) even it missed 33% data points. We can imputate the missing data before we build the model.
+
+TEAM_BASERUN_SB: We will keep this variable since the proportion of missing data is 5.8% which is barely above the 5% threashold. Also, one of the variables related to stole base TEAM_BASERUN_CS which has strong correlation to TEAM_BASERUN_SB will be removed. This variable could be useful for the modeling.
+
+
+
+```{r}
+train_clean <- train[,-which(names(train) %in% c( "TEAM_PITCHING_H","TEAM_PITCHING_HR","TEAM_PITCHING_BB","TEAM_PITCHING_SO","TEAM_BASERUN_CS",'TEAM_BATTING_HBP'))]
+
+train_clean_2 <-train[,-which(names(train) %in% c( "TEAM_PITCHING_H","TEAM_PITCHING_HR","TEAM_PITCHING_BB","TEAM_PITCHING_SO",'TEAM_BATTING_HBP'))]
+
+```
+
+#### 2.2 remove records with too many missing data points
+
+```{r}
+miss_sample <- as.data.frame(apply(train_clean,1,pMiss))
+colnames(miss_sample)<- c('missing value(%)')
+rownames(miss_sample)<- train_clean[,1]
+
+if (length(rownames(miss_sample)[which(miss_sample > 5)]) != 0) {
+  cat("There are ",length(rownames(miss_sample)[which(miss_sample > 5)]), " records has more than 5% missing data.", "\n")
+  #cat("The samples missed more than 5% datapoints:",paste(rownames(miss_sample)[which(miss_sample > 5)],collapse = ','))
+}else{
+  print("No samples missed more than 5% datapoints.")
+}
+
+if (length(rownames(miss_sample)[which(miss_sample > 10)]) != 0) {
+  cat("\n")
+  cat("There are ",length(rownames(miss_sample)[which(miss_sample > 10)]), " records has more than 10% missing data.", "\n")
+  cat("The samples missed more than 10% datapoints:",paste(rownames(miss_sample)[which(miss_sample > 10)],collapse = ','))
+}else{
+  cat("\n")
+  print("No samples missed more than 10% datapoints.")
+}
+
+
+```
+
+As far as the samples are concerned,there are 441(19%) sample misse 5% or more datapoints.So 5% would be too strick for this data set. There are  78  records has more than 10% missing data. 
+
+1.We will keep all samples and impute the missing data points.
+
+2.We will remove the 78 records and build the model based the rest data.
+
+```{r}
+del_records <- c(rownames(miss_sample)[which(miss_sample > 10)])
+
+train_del_rcd <- train_clean[-which(del_records %in% train_clean[,1]),]
+
+
+```
+
+#### 2.3 Impute the missing values 
+
+After removing the variables that miss more than 10% datapoints, there are still some variables missed some data points. We will impute the missing data for further analysis.
+
+```{r}
+suppressMessages(suppressWarnings(library(mice)))
+# view the available methods 
+#methods(mice)
+
+#train_clean_1 <- train[,-which(names(train) %in% c( "INDEX",        "TEAM_PITCHING_H","TEAM_PITCHING_HR", "TEAM_PITCHING_BB","TEAM_PITCHING_SO",'TEAM_BASERUN_SB','TEAM_BATTING_HBP'))]
+
+#train_clean_2 <- train[,-which(names(train) %in% c( "INDEX",        "TEAM_PITCHING_H","TEAM_PITCHING_HR", "TEAM_PITCHING_BB","TEAM_PITCHING_SO",'TEAM_BASERUN_SB','TEAM_BASERUN_CS','TEAM_BATTING_HBP','TEAM_FIELDING_DP'))]
+
+#check missing data
+#stat.desc(train_clean_1) 
+#stat.desc(train_clean_2) 
+
+# impute 5 data sets for the missing values in the data without removal of some records
+impData_1 <- mice(train_clean, m=5, printFlag=FALSE, meth="sample", maxit=50,seed=500)
+
+#compare the distributions of original and imputed data
+densityplot(impData_1)
+
+# impute 5 data sets for the missing values in the data with removal of some records
+impData_2 <- mice(train_del_rcd,m=5,printFlag=FALSE,meth="sample", maxit=50,seed=500)
+densityplot(impData_2)
+
+# impute 5 data sets for the missing values in the data without removal of some records and has "CS"
+impData_3 <- mice(train_clean_2,m=5,printFlag=FALSE,meth="sample", maxit=50,seed=500)
+densityplot(impData_3)
+
+# get back the completed dataset where the missing values have been replaced with the imputed values in the first of the five datasets
+train_cln_im <- complete(impData_1,1)
+
+train_dlrd_im <- complete(impData_2,1)
+
+train_cln2_im <- complete(impData_3,1)
+
+```
+
+For the data set used for model #1,#3, 102 missing values of "TEAM_BATTING_SO" were imputed. 131 missing values of "TEAM_BASERUN_SB" were imputed. 286 missing values of "TEAM_FIELDING_DP" were imputed.
+
+For the data set used for model #2, 100 missing values of "TEAM_BATTING_SO" were imputed. 121 missing values of "TEAM_BASERUN_SB" were imputed. 269 missing values of "TEAM_FIELDING_DP" were imputed.
+
+For the data set used for model #4, 102 missing values of "TEAM_BATTING_SO" were imputed. 131 missing values of "TEAM_BASERUN_SB" were imputed. 286 missing values of "TEAM_FIELDING_DP" were imputed, and 772 missing values of "TEAM_BASERUN_CS" were imputed.
+
+Sample method has been used in the imputation. As shown in the density plots, the distribution of the five imputed data sets which are presented as blue is similar to the density of the observed data presented as blue. 
+
+
+
+#### 2.3 Transform the data
+
+#### 2.3.1 Create a new derived variable
+
+In the baseball, a run is scored either when the player hits a home run or when he advances around first, second and third and return to the home plate safely. Some combination of all successful singles, doubles, triples and walks will contribute to the chance of scoring. The baseball writer and statistician, Bill James, invented runs created (RC) to estimate the number of runs a batter contributes to his team. We will use the base formula and two advanced formula to generate two new variables.
+
+Basic runs created
+$RC = \frac{(H+BB)\times TB}{AB+BB}$
+
+"Stolen base" version of runs created:
+$RC = \frac{(H+BB-CS)(TB + 0.55 \times SB )}{AB+BB}$
+
+H: hits, also called a base hits
+
+$H = Singles + Doubles + Triples + Home runs$
+
+TB: total bases (TBs) is the number of bases a player has gained with hits.  
+
+$total bases (TB) = 1\times Singles + 2 \times Doubles + 3 \times Triples + 4 \times Home runs$
+
+or 
+
+$total bases (TB) = H + Doubles + 2 \times Triples + 3 \times Homeruns$
+
+AB: an at bat (AB) or time at bat is a batter's turn batting against a pitcher. A batter is credited with an at bat only if that plate appearance does not have base on balls, hit by a pitch, or the hitter hits a sacrifice fly or a sacrifice bunt, etc. We do not have at bat data but we can estimate the value from the batting average (BA). batting average is defined by the number of hits divided by at bats. From the Wikipedia we know that the all-time league batting average in Major League Baseball is between .260 and .275. So we can estimate AB as H/((.26+.275)/2).
+
+
+For data set without removal of some records
+```{r}
+train_new <- train_cln_im 
+# calculate TB
+train_new$TEAM_BATTING_TB <- train_new$TEAM_BATTING_H + train_new$TEAM_BATTING_2B + 2* train_new$TEAM_BATTING_3B +3*train_new$TEAM_BATTING_HR
+
+# calculate AB
+train_new$TEAM_BATTING_AB <- train_new$TEAM_BATTING_H/((0.26+0.275)/2)
+
+# calculate basic RC
+train_new$RC_b <-((train_new$TEAM_BATTING_H + train_new$TEAM_BATTING_BB)*train_new$TEAM_BATTING_TB)/(train_new$TEAM_BATTING_AB +train_new$TEAM_BATTING_BB)
+
+#  the stolen will need TEAM_BASERUN_CS, we will put this variable back 
+train_new_2 <- train_cln2_im
+
+# recalculate TB
+train_new_2$TEAM_BATTING_TB <- train_new_2$TEAM_BATTING_H + train_new_2$TEAM_BATTING_2B + 2* train_new_2$TEAM_BATTING_3B +3*train_new_2$TEAM_BATTING_HR
+
+# recalculate AB
+train_new_2$TEAM_BATTING_AB <- train_new_2$TEAM_BATTING_H/((0.26+0.275)/2)
+
+# calculate "Stolen base" version RC
+train_new_2$RC_s <-((train_new_2$TEAM_BATTING_H + train_new_2$TEAM_BATTING_BB - train_new_2$TEAM_BASERUN_CS )*(train_new_2$TEAM_BATTING_TB + 0.55*train_new_2$TEAM_BASERUN_SB))/(train_new_2$TEAM_BATTING_AB +train_new_2$TEAM_BATTING_BB)
+
+
+#options(scipen = 100)
+#options(digits = 2)
+#stat.desc(train_new_2) 
+
+#train_new_2[] <- lapply(train_new_2, as.numeric)
+
+
+```
+
+
+The new variables and the components of the formula are clearly collinear variables. So we remove those variables consist the right side of the formula but keep the new variable runs created and the left variables as predictor. variance inflation factors (VIF) will be used to examine whether there are no collinearity issues.
+
+```{r}
+# copy these files in the working directory and source the code for vif function
+source(file = "HighstatLibV6.R")
+
+tc <- train_new[,-which(names(train_new) %in% c("INDEX","TARGET_WINS","TEAM_BATTING_TB", "TEAM_BATTING_AB","TEAM_BATTING_H", "TEAM_BATTING_2B","TEAM_BATTING_3B","TEAM_BATTING_HR", 
+"TEAM_BATTING_BB", "TEAM_BASERUN_SB"))]
+
+tc_2 <- train_new_2[,-which(names(train_new_2) %in% c("INDEX","TARGET_WINS","TEAM_BATTING_TB", "TEAM_BATTING_AB","TEAM_BATTING_H", "TEAM_BATTING_2B","TEAM_BATTING_3B","TEAM_BATTING_HR", 
+"TEAM_BATTING_BB", "TEAM_BASERUN_SB","TEAM_BASERUN_CS"))]
+
+corvif_noCorr <- function(dataz) {
+    dataz <- as.data.frame(dataz)
+    # correlation part cat('Correlations of the variables\n\n') tmp_cor <-
+    # cor(dataz,use='complete.obs') print(tmp_cor)
+
+    # vif part
+    form <- formula(paste("fooy ~ ", paste(strsplit(names(dataz), " "), collapse = " + ")))
+    dataz <- data.frame(fooy = 1, dataz)
+    lm_mod <- lm(form, dataz)
+
+    cat("\n\nVariance inflation factors\n\n")
+    print(myvif(lm_mod))
+}
+
+thinXwithVIF = function(X, Threshold = 3) {
+    VIFS = corvif(X)
+    XVars = names(X)
+    max(VIFS$GVIF)
+    while (max(VIFS$GVIF) >= Threshold) {
+        print(paste("Drop ", XVars[which.max(VIFS$GVIF)], ".", sep = ""), quote = FALSE)
+        XVars = XVars[-which.max(VIFS$GVIF)]
+        X = X[, -which.max(VIFS$GVIF)]
+        VIFS = corvif_noCorr(X)
+        print(max(VIFS$GVIF))
+    }
+    return(list(VIFS = VIFS, XVars = XVars, X = X))
+}
+
+
+Threshold <- 5
+thinXwithVIF(tc, Threshold)
+
+thinXwithVIF(tc_2, Threshold)
+
+```
+
+VIF test shows there is no collinearities between predictors. We will use TEAM_BATTING_SO, TEAM_FIELDING_E,TEAM_FIELDING_DP and RC_b for modeling #3. TEAM_BATTING_SO,TEAM_BASERUN_CS,TEAM_FIELDING_E,TEAM_BATTING_AB and RC_s will be used for modeling #4.
+
+
+```{r}
+# get the significant variables to form new data sets
+
+train_newv <- train_new[,which(names(train_new) %in% c("TARGET_WINS","TEAM_BATTING_SO","TEAM_FIELDING_E","TEAM_FIELDING_DP","RC_b"))]
+
+train_newv_2 <- train_new_2[,which(names(train_new_2) %in% c("TARGET_WINS","TEAM_BATTING_SO","TEAM_BASERUN_CS","TEAM_FIELDING_E","TEAM_BATTING_AB","RC_s"))]
+
+```
+
+The new dataset contains four predictor variables including basic runs created (train_newv) or five predictor variables (train_newv_2) will be for model # 4 and #5. We then check the relationship among all variables in one single matrix plot.
+```{r,eval=F}
+#Plot matrix of all variables.
+plot(train_newv, pch=16, col="black", main="Matrix Scatterplot for train_newv")
+```
+
+```{r,eval=F}
+#Plot matrix of all variables.
+plot(train_newv_2, pch=16, col="black", main="Matrix Scatterplot train_newv_2")
+```
+
+#### 2.3.2 Box-Cox Transformation of predictors
+
+ 
+After imputation and generating new variables, we will make transformation for variables have non-normality of distribution. 
+
+Form data exploration section we concluded that four predictor variables TEAM_BATTING_3B, TEAM_BATTING_HR, TEAM_BASERUN_SB, TEAM_FIELDING_E can not be assumed normal and need to transform the Four new variables TEAM_BATTING_3B_lg, TEAM_BATTING_HR_lg, TEAM_BASERUN_SB_lg, PITCHING_E_lg will be created by using log transformation and four new variables TEAM_BATTING_3B_tr, TEAM_BATTING_HR_tr, TEAM_BASERUN_SB_tr, PITCHING_E_tr will be created by using for Box-Cox transformation.
+
+```{r}
+# log transformation
+train_cln_im$TEAM_BATTING_3B_lg <- log(train_cln_im$TEAM_BATTING_3B)
+train_cln_im$TEAM_BATTING_HR_lg <- log(train_cln_im$TEAM_BATTING_HR)
+train_cln_im$TEAM_BASERUN_SB_lg <- log(train_cln_im$TEAM_BASERUN_SB)
+train_cln_im$TEAM_FIELDING_E_lg <- log(train_cln_im$TEAM_FIELDING_E)
+
+suppressMessages(suppressWarnings(library(geoR))) # response variable must be positive when apply MASS boxcox function need a linear regression object. geoR allow Box-Cox transform single vector.
+
+bc <- boxcoxfit(train_cln_im$TEAM_BATTING_3B, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+#X.new = (X ^ lambda - 1) / lambda
+train_cln_im$TEAM_BATTING_3B_tr <- (train_cln_im$TEAM_BATTING_3B^lambda1 - 1) / lambda1
+
+
+bc <- boxcoxfit(train_cln_im$TEAM_BATTING_HR, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+#X.new = (X ^ lambda - 1) / lambda
+train_cln_im$TEAM_BATTING_HR_tr <- (train_cln_im$TEAM_BATTING_HR^lambda1 - 1) / lambda1
+
+
+bc <- boxcoxfit(train_cln_im$TEAM_BASERUN_SB, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+#X.new = (X ^ lambda - 1) / lambda
+train_cln_im$TEAM_BASERUN_SB_tr <- (train_cln_im$TEAM_BASERUN_SB^lambda1 - 1) / lambda1
+
+
+bc <- boxcoxfit(train_cln_im$TEAM_FIELDING_E, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+#X.new = (X ^ lambda - 1) / lambda
+train_cln_im$TEAM_FIELDING_E_tr <- (train_cln_im$TEAM_FIELDING_E^lambda1 - 1) / lambda1
+
+# View the distribution before and after transformation
+par(mfrow = c(4, 2))
+hist(train_cln_im$TEAM_BATTING_3B,main='TEAM_BATTING_3B')
+hist(train_cln_im$TEAM_BATTING_3B_tr,main='transformed TEAM_BATTING_3B')
+hist(train_cln_im$TEAM_BATTING_HR,main='TEAM_BATTING_3B')
+hist(train_cln_im$TEAM_BATTING_HR_tr,main='transformed TEAM_BATTING_HR')
+hist(train_cln_im$TEAM_BASERUN_SB,main='TEAM_BATTING_3B')
+hist(train_cln_im$TEAM_BASERUN_SB_tr,main='transformed TEAM_BASERUN_SB')
+hist(train_cln_im$TEAM_FIELDING_E,main='TEAM_BATTING_3B')
+hist(train_cln_im$TEAM_FIELDING_E_tr,main='transformed TEAM_FIELDING_E')
+
+```
+
+
+```{r}
+bc <- boxcoxfit(train_dlrd_im$TEAM_BATTING_3B, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+#X.new = (X ^ lambda - 1) / lambda
+train_dlrd_im$TEAM_BATTING_3B_tr <- (train_dlrd_im$TEAM_BATTING_3B^lambda1 - 1) / lambda1
+
+
+bc <- boxcoxfit(train_dlrd_im$TEAM_BATTING_HR, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+#X.new = (X ^ lambda - 1) / lambda
+train_dlrd_im$TEAM_BATTING_HR_tr <- (train_dlrd_im$TEAM_BATTING_HR^lambda1 - 1) / lambda1
+
+
+bc <- boxcoxfit(train_dlrd_im$TEAM_BASERUN_SB, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+#X.new = (X ^ lambda - 1) / lambda
+train_dlrd_im$TEAM_BASERUN_SB_tr <- (train_dlrd_im$TEAM_BASERUN_SB^lambda1 - 1) / lambda1
+
+
+bc <- boxcoxfit(train_dlrd_im$TEAM_FIELDING_E, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+#X.new = (X ^ lambda - 1) / lambda
+train_dlrd_im$TEAM_FIELDING_E_tr <- (train_dlrd_im$TEAM_FIELDING_E^lambda1 - 1) / lambda1
+
+# View the distribution before and after transformation
+par(mfrow = c(4, 2))
+hist(train_dlrd_im$TEAM_BATTING_3B,main='TEAM_BATTING_3B')
+hist(train_dlrd_im$TEAM_BATTING_3B_tr,main='transformed TEAM_BATTING_3B')
+hist(train_dlrd_im$TEAM_BATTING_HR,main='TEAM_BATTING_3B')
+hist(train_dlrd_im$TEAM_BATTING_HR_tr,main='transformed TEAM_BATTING_HR')
+hist(train_dlrd_im$TEAM_BASERUN_SB,main='TEAM_BATTING_3B')
+hist(train_dlrd_im$TEAM_BASERUN_SB_tr,main='transformed TEAM_BASERUN_SB')
+hist(train_dlrd_im$TEAM_FIELDING_E,main='TEAM_BATTING_3B')
+hist(train_dlrd_im$TEAM_FIELDING_E_tr,main='transformed TEAM_FIELDING_E')
+
+```
+
+For basic and "stolen based" runs created models, first check the distribution of the predictors in the corresponding data sets. From the figure below we can see that both basic runs created values and "stolen based" runs created values follow normal distribution. TEAM_FIELDING_E and TEAM_BASERUN_CS will be Box-Cox transformed.
+
+**TEAM_FIELDING_E in train_newv**
+
+```{r}
+par(mfrow=c(3,3))
+for(i in 2:dim(train_newv)[2]){
+  hist(train_newv[,i], probability = T, xlab = '', main = colnames(train_newv)[i])
+  d <- density(train_newv[,i],na.rm= T)
+  lines(d,col = 'red')
+}
+
+```
+
+```{r}
+suppressWarnings(suppressMessages(library(MASS)))
+
+Box <- boxcox(train_newv$TEAM_FIELDING_E ~ 1,              # Transform X as a single vector
+             lambda = seq(-1.5,1.5,0.1)      # Try values -1.5 to 1.5 by 0.1
+             )
+
+Cox <- data.frame(Box$x, Box$y)            # Create a data frame with the results
+
+Cox2 <- Cox[with(Cox, order(-Cox$Box.y)),] # Order the new data frame by decreasing y
+
+Cox2[1,]                                  # Display the lambda with the greatest
+                                          #    log likelihood
+
+(lambda <- Cox2[1, "Box.x"])   # Extract that lambda
+
+#transform
+newv_E_tr <- (train_newv$TEAM_FIELDING_E^lambda - 1) / lambda
+train_newv$newv_E_tr <- newv_E_tr
+```
+
+
+```{r,eval=F}
+# View the distribution before and after transformation
+par(mfrow = c(2, 2))
+hist(train_newv$TEAM_FIELDING_E,main='TEAM_FIELDING_E')
+hist(train_newv$newv_E_tr, main='transformed TEAM_FIELDING_E')
+
+par(mfrow = c(2, 2))
+qqnorm(train_newv$TEAM_FIELDING_E) 
+qqline(train_newv$TEAM_FIELDING_E, col = 2)
+qqnorm(newv_E_tr) 
+qqline(newv_E_tr, col = 2)
+
+qqplot(train_newv$TEAM_FIELDING_E, train_newv$TARGET_WINS, plot.it = TRUE, xlab = deparse(substitute(newv_E)),
+       ylab = deparse(substitute(TARGET_WINS)))
+qqplot(newv_E_tr, train_newv$TARGET_WINS, plot.it = TRUE, xlab = deparse(substitute(newv_E_tr)),
+       ylab = deparse(substitute(TARGET_WINS)))
+qqline(train_newv$TARGET_WINS, datax = FALSE, distribution = qnorm,
+       probs = c(0.25, 0.75), qtype = 7)
+```
+
+
+**TEAM_BASERUN_CS in train_newv_2**
+```{r}
+par(mfrow=c(3,3))
+for(i in 2:dim(train_newv_2)[2]){
+  hist(train_newv_2[,i], probability = T, xlab = '', main = colnames(train_newv_2)[i])
+  d <- density(train_newv_2[,i],na.rm= T)
+  lines(d,col = 'red')
+}
+
+
+```
+
+```{r}
+suppressMessages(suppressWarnings(library(geoR))) # response variable must be positive when apply MASS boxcox function need a linear regression object. geoR allow Box-Cox transform single vector.
+
+bc <- boxcoxfit(train_newv_2$TEAM_BASERUN_CS, lambda2 = TRUE)
+
+lambda1 <- bc$lambda[1]
+
+#X.new = (X ^ lambda - 1) / lambda
+new2_CS_tr <- (train_newv_2$TEAM_BASERUN_CS^lambda1 - 1) / lambda1
+
+# View the distribution before and after transformation
+par(mfrow = c(2, 2))
+hist(train_newv_2$TEAM_BASERUN_CS,main='TEAM_BASERUN_CS')
+hist(new2_CS_tr,main='transformed TEAM_BASERUN_CS')
+
+par(mfrow = c(3, 2))
+qqnorm(train_newv_2$TEAM_BASERUN_CS) 
+qqline(train_newv_2$TEAM_BASERUN_CS, col = 2)
+qqnorm(new2_CS_tr) 
+qqline(new2_CS_tr, col = 2)
+
+qqplot(train_newv_2$TEAM_BASERUN_CS, train_newv_2$TARGET_WINS, plot.it = TRUE, xlab = deparse(substitute(newv2_CS)),
+       ylab = deparse(substitute(TARGET_WINS)))
+qqplot(new2_CS_tr, train_newv_2$TARGET_WINS, plot.it = TRUE, xlab = deparse(substitute(newv2_CS_tr)),
+       ylab = deparse(substitute(TARGET_WINS)))
+qqline(train_newv_2$TARGET_WINS, datax = FALSE, distribution = qnorm,
+       probs = c(0.25, 0.75), qtype = 7)
+
+```
+
+The Box-Cox transformed predictors variables TEAM_FIELDING_E and TEAM_BASERUN_CS follow normal distribution.
+
+
+#### 2.5 Remove outliers
+
+
+trnsformed TEAM_BATTING_3B, TEAM_BATTING_HR, TEAM_BASERUN_SB, TEAM_PITCHING_E
+Boxplot
+```{r}
+#show transformed variables and other variables with no need of transformation in boxplot
+use_fatures <- c("TARGET_WINS", "TEAM_BATTING_H" , "TEAM_BATTING_2B" ,  "TEAM_BATTING_BB"  ,  "TEAM_BATTING_SO" ,  "TEAM_FIELDING_DP" ,  "TEAM_BATTING_3B_tr", "TEAM_BATTING_HR_tr", "TEAM_BASERUN_SB_tr" ,"TEAM_FIELDING_E_tr","TEAM_BATTING_3B_lg","TEAM_BATTING_HR_lg","TEAM_BASERUN_SB_lg" ,"TEAM_FIELDING_E_lg")
+
+par(cex.axis=0.7, cex.lab=1, las = 1,mar=c(2,10,2,1)+.1)
+boxplot(train_cln_im[,which(names(train_cln_im) %in% use_fatures)],horizontal = T)
+
+```
+
+The boxplot show that data transformation process is dramatically improving the data. 
+
+
+```{r}
+# predictor variables for each model
+use_fatures_1 <- c("TARGET_WINS", "TEAM_BATTING_H", "TEAM_BATTING_2B",  "TEAM_BATTING_BB",  "TEAM_BATTING_SO","TEAM_FIELDING_DP", "TEAM_BATTING_3B_lg","TEAM_BATTING_HR_lg","TEAM_BASERUN_SB_lg" ,"TEAM_FIELDING_E_lg")
+
+use_fatures_3 <- c("TARGET_WINS", "TEAM_BATTING_H" , "TEAM_BATTING_2B" ,  "TEAM_BATTING_BB"  ,  "TEAM_BATTING_SO" ,  "TEAM_FIELDING_DP" ,  "TEAM_BATTING_3B_tr", "TEAM_BATTING_HR_tr", "TEAM_BASERUN_SB_tr" ,"TEAM_FIELDING_E_tr")
+
+use_fatures_4 <- c("TARGET_WINS", "TEAM_BATTING_H","TEAM_BATTING_2B","TEAM_BATTING_BB", "TEAM_BATTING_SO",  "TEAM_FIELDING_DP","TEAM_BATTING_3B_tr","TEAM_BATTING_HR_tr", "TEAM_BASERUN_SB_tr", "TEAM_FIELDING_E_tr")
+
+use_fatures_5 <- c("TARGET_WINS", "TEAM_BATTING_SO", "TEAM_FIELDING_DP", "RC_b","newv_E_tr")
+
+use_fatures_6 <- c("TARGET_WINS", "TEAM_BATTING_SO", "TEAM_FIELDING_E", "TEAM_BATTING_AB",
+"RC_s" ,"newv_CS_tr")
+
+# subsetting data sets for different each model
+train_cln_sub_1 <- train_cln_im[,which(names(train_cln_im) %in% use_fatures_1)]
+train_cln_sub_3 <- train_cln_im[,which(names(train_cln_im) %in% use_fatures_3)]
+train_dlrd_sub_4 <- train_dlrd_im[,which(names(train_dlrd_im) %in% use_fatures_4)]
+train_newv_sub_5 <- train_newv[,which(names(train_newv) %in% use_fatures_5)]
+train_newv2_sub_6 <- train_newv_2[,which(names(train_newv_2) %in% use_fatures_6)]
+
+# find out the outliers in all data sets prepraed for different models
+out_cln_1 <- lapply(train_cln_sub_1, function(x) boxplot.stats(x)$out)
+out_cln_3 <- lapply(train_cln_sub_3, function(x) boxplot.stats(x)$out)
+out_dlrd <- lapply(train_dlrd_sub_4, function(x) boxplot.stats(x)$out)
+out_newv <- lapply(train_newv_sub_5, function(x) boxplot.stats(x)$out)
+out_newv2 <- lapply(train_newv2_sub_6, function(x) boxplot.stats(x)$out)
+
+rm_out <- function(dt,out_list){
+  for(i in 1:dim(dt)[2]){
+    if (length(unlist(out_list[names(out_list)[i]])) !=0){
+      dt <- dt[-which(dt[,names(out_list)[i]] %in% unlist(out_list[names(out_list)[i]])),]
+    }
+  }
+  return(dt)
+}
+
+train_cln_ro_1 <-rm_out(train_cln_sub_1,out_cln_1)
+train_cln_ro_3 <-rm_out(train_cln_sub_3,out_cln_3)
+train_dlrd_ro_4 <-rm_out(train_dlrd_sub_4,out_dlrd)
+train_newv_ro_5 <-rm_out(train_newv_sub_5,out_newv)
+train_newv2_ro_6 <-rm_out(train_newv2_sub_6,out_newv2)
+
+#for(i in 1:dim(train_cln_ro_1)[2]){
+    #if (length(unlist(out_cln_1[names(out_cln_1)[i]])) !=0){
+      #train_cln_ro_1 <- (train_cln_ro_1[-which(train_cln_ro_1[,names(out_cln_1)[i]] %in%
+      #                  unlist(out_cln_1[names(out_cln_1)[i]])),])
+    #}
+#}
+
+```
+
+Boxplot after removing outlineres
+```{r}
+par(cex.axis=0.7, cex.lab=1, las = 1,mar=c(2,10,2,1)+.1)
+boxplot(train_cln_ro_1,horizontal = T,  main="data set for model 1 and 2")
+
+par(cex.axis=0.7, cex.lab=1, las = 1,mar=c(2,10,2,1)+.1)
+boxplot(train_cln_ro_3,horizontal = T, main="data set for model 3")
+
+par(cex.axis=0.7, cex.lab=1, las = 1,mar=c(2,10,2,1)+.1)
+boxplot(train_dlrd_ro_4,horizontal = T,main="data set for model 4")
+
+par(cex.axis=0.7, cex.lab=1, las = 1,mar=c(2,10,2,1)+.1)
+boxplot(train_newv_ro_5,horizontal = T, main="data set for model 5")
+
+par(cex.axis=0.7, cex.lab=1, las = 1,mar=c(2,10,2,1)+.1)
+boxplot(train_newv2_ro_6,horizontal = T, main="data set for model 6")
+
+```
+
+
+```{r}
+data_for_model <- data.frame('datasets'=c('train_cln_im','train_cln_im','train_cln_im','train_dlrd_im','train_newv','train_newv_2'),'datasets rm outliers'=c('train_cln_ro_1','train_cln_ro_1','train_cln_ro_3','train_dlrd_ro_4','train_newv_ro_5','train_newv2_ro_6'),'transformation'=c('log','log','Box-Cox','Box-Cox','Box-Cox','Box-Cox'),'model'=c('#1(basic-Backward Elimination)','#2(basic-Forward Stepwise Regression)','#3(basic-Backward Elimination)','#4(basic-removing some records then Backward Elimination)','#5(new feature - basic runs created)','#6(new feature - stolen base version runs created)'))
+kable(data_for_model, "html") %>%
+  kable_styling(bootstrap_options = c("striped", "bordered", "hover", "condensed"),full_width = F)
+```
+
+
+
+
+### 3. BUILD MODELS
+
+#### 3.1 Model 1 - backward stepwise selection
+
+Backward elimination: remove variables until we are left with only statistically significant variables.
+
+```{r}
+full <- lm(TARGET_WINS~., data=train_dlrd_ro_4)
+step(full, data=Housing, direction="backward")
+
+```
+
+According to this procedure, all the predictor variables are significant and there is no need to do backforward selection.
+
+So we skip imputation and delete uncompleted records and use the data set to fit a model.
+
+```{r}
+# only remove "TEAM_BATTING_HBP"
+del_feature <- c("INDEX","TEAM_BATTING_HBP")
+train_f_slc <- train[,-which(names(train) %in% del_feature)]
+
+par(mfrow=c(3,3))
+for(i in 2:dim(train_f_slc)[2]){
+  hist(train_f_slc[,i], probability = T, xlab = '', main = colnames(train_f_slc)[i])
+  d <- density(train_f_slc[,i],na.rm= T)
+  lines(d,col = 'red')
+}
+
+#########################################################################
+#Box-Cox transformation
+#log transformation for TEAM_PITCHING_BB because Box-Cox could not apply
+bc <- boxcoxfit(train_f_slc$TEAM_BATTING_3B, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+train_f_slc$TEAM_BATTING_3B_tr <- (train_f_slc$TEAM_BATTING_3B^lambda1 - 1) / lambda1
+
+bc <- boxcoxfit(train_f_slc$TEAM_BATTING_HR, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+train_f_slc$TEAM_BATTING_HR_tr <- (train_f_slc$TEAM_BATTING_HR^lambda1 - 1) / lambda1
+
+bc <- boxcoxfit(train_f_slc$TEAM_BASERUN_SB, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+train_f_slc$TEAM_BASERUN_SB_tr <- (train_f_slc$TEAM_BASERUN_SB^lambda1 - 1) / lambda1
+
+#bc <- boxcoxfit(train_f_slc$TEAM_PITCHING_H, lambda2 = TRUE)
+#lambda1 <- bc$lambda[1]
+#train_f_slc$TEAM_PITCHING_H_tr <- (train_f_slc$TEAM_PITCHING_H^lambda1 - 1) / lambda1
+
+bc <- boxcoxfit(train_f_slc$TEAM_PITCHING_HR, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+train_f_slc$TEAM_PITCHING_HR_tr <- (train_f_slc$TEAM_PITCHING_HR^lambda1 - 1) / lambda1
+
+bc <- boxcoxfit(train_f_slc$TEAM_PITCHING_SO, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+train_f_slc$TEAM_PITCHING_SO_tr <- (train_f_slc$TEAM_PITCHING_SO^lambda1 - 1) / lambda1
+
+bc <- boxcoxfit(train_f_slc$TEAM_FIELDING_E, lambda2 = TRUE)
+lambda1 <- bc$lambda[1]
+train_f_slc$TEAM_FIELDING_E_tr <- (train_f_slc$TEAM_FIELDING_E^lambda1 - 1) / lambda1
+
+train_f_slc$TEAM_PITCHING_BB_tr <- log(train_f_slc$TEAM_PITCHING_BB)
+train_f_slc$TEAM_PITCHING_H_tr <- log(train_f_slc$TEAM_PITCHING_H)
+
+del_ori_ftr <- c("TEAM_BATTING_3B","TEAM_BATTING_HR","TEAM_BASERUN_SB","TEAM_PITCHING_H","TEAM_PITCHING_HR","TEAM_PITCHING_BB","TEAM_PITCHING_SO","TEAM_FIELDING_E")
+train_f_slc_tr <- train_f_slc[,-which(names(train_f_slc) %in% del_ori_ftr)]
+
+#########################################################################
+
+
+#########################################################################
+#remove outlier
+out_slc <- lapply(train_f_slc_tr, function(x) boxplot.stats(x)$out)
+train_f_slc_tr <-rm_out(train_f_slc_tr,out_slc)
+boxplot(train_f_slc_tr)
+#########################################################################
+#stat.desc(train_f_slc_tr)
+train_f_slc_tr <- na.omit(train_f_slc_tr)  # it's important to remove NAs
+full <- lm(TARGET_WINS~., data=train_f_slc_tr)
+(bkwd_fit <- step(full, data=Housing, direction="backward"))
+
+```
+
+According to this procedure, the best model is the one that includes the variables TEAM_BATTING_H,TEAM_BATTING_2B, TEAM_BATTING_BB, TEAM_BATTING_SO, TEAM_FIELDING_DP,  TEAM_BATTING_3B_tr,   TEAM_BASERUN_SB_tr, TEAM_PITCHING_HR_tr, TEAM_FIELDING_E_tr and   TEAM_PITCHING_BB_tr.
+
+```{r}
+summary(bkwd_fit)
+#backward_feature <- c('TEAM_BATTING_H','TEAM_BATTING_2B', 'TEAM_BATTING_BB', 'TEAM_BATTING_SO', 'TEAM_FIELDING_DP','TEAM_BATTING_3B_tr', 'TEAM_BASERUN_SB_tr', 'TEAM_PITCHING_HR_tr', 'TEAM_FIELDING_E_tr', 'TEAM_PITCHING_BB_tr')
+#summary(lm(paste('TARGET_WINS ~',paste(backward_feature,collapse = "+")),train_f_slc_tr))
+
+par(mfrow=c(2,2))
+plot(bkwd_fit)
+```
+
+#### 3.2 Model 2 - Forward Stepwise Selection
+
+```{r}
+train_f_slc_tr <- na.omit(train_f_slc_tr)
+null <- lm(TARGET_WINS~1, data=train_f_slc_tr)
+full <- lm(TARGET_WINS~., data=train_f_slc_tr)
+(frwd_fit <- step(null, scope=list(lower=null, upper=full), direction="forward"))
+```
+
+```{r}
+summary(frwd_fit)
+#forward_feature <- c('TEAM_BATTING_H', 'TEAM_FIELDING_E_tr', 'TEAM_BATTING_BB', 'TEAM_BATTING_2B', 'TEAM_FIELDING_DP', 'TEAM_BATTING_HR_tr', 'TEAM_BATTING_SO', 'TEAM_BASERUN_SB_tr', 'TEAM_BATTING_3B_tr',  'TEAM_PITCHING_BB_tr')
+#summary(lm(paste('TARGET_WINS ~',paste(forward_feature,collapse = "+")),train_f_slc_tr))
+par(mfrow=c(2,2))
+plot(frwd_fit)
+```
+
+
+
+According to this procedure, the best model is the one that includes the variables TEAM_BATTING_H, TEAM_FIELDING_E_tr, TEAM_BATTING_BB, TEAM_BATTING_2B, TEAM_FIELDING_DP,   TEAM_BATTING_HR_tr, TEAM_BATTING_SO, TEAM_BASERUN_SB_tr, TEAM_BATTING_3B_tr, and TEAM_PITCHING_BB_tr. 
+
+
+
+
+```{r}
+fitmd_1 <- lm(TARGET_WINS ~., train_cln_ro_1)
+summary(fitmd_1)
+
+fitmd_3 <- lm(TARGET_WINS ~., train_cln_ro_3)
+summary(fitmd_3)
+
+fitmd_4 <- lm(TARGET_WINS ~., train_dlrd_ro_4)
+summary(fitmd_4)
+
+fitmd_5 <- lm(TARGET_WINS ~., train_newv_ro_5)
+summary(fitmd_5)
+
+fitmd_6 <- lm(TARGET_WINS ~., train_newv2_ro_6)
+summary(fitmd_6)
+
+```
+
+```{r}
+fitmd_7 <- update(fitmd_6, .~. -TEAM_BATTING_AB)
+summary(fitmd_7)
+
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(fitmd_3)
+
+par(mfrow=c(2,2))
+plot(fitmd_5)
+
+par(mfrow=c(2,2))
+plot(fitmd_7)
+
+```
+
+### 4. SELECT MODELS
+
+Model selection rationale
+
+```{r}
+#aic_df <- AIC(bkwd_fit,frwd_fit,fitmd_3,fitmd_5,fitmd_7)
+
+#data.frame('df'=c(16,14, aic_df$df[1],aic_df$df[2],5,aic_df$df[3],aic_df$df[4],aic_df$df[5]),'AIC'=c(18145.78,18173.93,aic_df$AIC[1],aic_df$AIC[2],18533.77,aic_df$AIC[3],aic_df$AIC[4],aic_df$AIC[5]))
+
+# We can not Compare AIC among models with different amounts of data.
+```
+
+```{r}
+model_list <- list(model1,model2,bkwd_fit,frwd_fit,model3,fitmd_3,fitmd_5,fitmd_7)
+```
+
+
+```{r,RMSE}
+
+model_list <- list(model1,model2,bkwd_fit,frwd_fit,model3,fitmd_3,fitmd_5,fitmd_7)
+
+###########################################################
+#RMSE
+rmse_calculation <- function(x){
+  RSS <- c(crossprod(x))
+  MSE <- RSS / length(x)
+  RMSE <- sqrt(MSE)
+  return(RMSE)  
+}
+
+#rsdls <- list(bkwd_fit$residuals,frwd_fit$residuals,fitmd_3$residuals,fitmd_5$residuals,fitmd_7$residuals)
+
+#rmse_df <- data.frame()
+#for (i in 1:length(rsdls)){
+#  rlt<-rmse_calculation(rsdls[[i]])
+#  rmse_df <- rbind(rmse_df,rlt)
+#}
+#colnames(rmse_df) <- c('RMSE')
+
+rmse_df <- data.frame()
+for (i in 1:length(model_list)){
+  rlt<-rmse_calculation(model_list[[i]]$residuals)
+  rmse_df <- rbind(rmse_df,rlt)
+}
+colnames(rmse_df) <- c('RMSE')
+
+
+
+##########################################################
+
+##########################################################
+#Pearson estimated residual variance
+
+person_rsv <- function(x,y){
+  RSS <- c(crossprod(x))
+  sig_Prs <- RSS /y
+  return(sig_Prs)  
+}
+
+#rsdls_df <- list(bkwd_fit$df.residual,frwd_fit$df.residual,fitmd_3$df.residual,fitmd_5$df.residual,fitmd_7$df.residual)
+
+#PersonSig_df <- data.frame()
+#for (i in 1:length(rsdls)){
+#  rlt<-  person_rsv(rsdls[[i]],rsdls_df[[i]])
+#  PersonSig_df <- rbind(PersonSig_df,rlt)
+#}
+#colnames(PersonSig_df) <- c('Pearson_Var')
+
+PersonSig_df <- data.frame()
+for (i in 1:length(model_list)){
+  rlt<-  person_rsv(model_list[[i]]$residuals,model_list[[i]]$df.residual)
+  PersonSig_df <- rbind(PersonSig_df,rlt)
+}
+colnames(PersonSig_df) <- c('Pearson.Var')
+
+##########################################################
+
+
+##########################################################
+#R^2
+r2_df <- data.frame()
+for (i in 1:length(model_list)){
+  rlt<-  summary(model_list[[i]])$r.squared 
+  r2_df <- rbind(r2_df,rlt)
+}
+colnames(r2_df) <- c('R2')
+##########################################################
+
+##########################################################
+# Adj.R^2
+adjR2_df <- data.frame()
+for (i in 1:length(model_list)){
+  rlt<-  summary(model_list[[i]])$adj.r.squared 
+  adjR2_df <- rbind(adjR2_df,rlt)
+}
+colnames(adjR2_df) <- c('Adj.R2')
+##########################################################
+
+##########################################################
+# F-test
+F_df <- data.frame()
+for (i in 1:length(model_list)){
+  rlt<-  summary(model_list[[i]])$fstatistic[1]
+  F_df <- rbind(F_df,rlt)
+}
+colnames(F_df) <- c('F-statistic')
+##########################################################
+
+##########################################################
+# number of predictors 
+prd_df <- data.frame()
+for (i in 1:length(model_list)){
+  rlt<-  summary(model_list[[i]])$fstatistic[2]
+  prd_df <- rbind(prd_df,rlt)
+}
+colnames(prd_df) <- c('Predictors')
+##########################################################
+
+model_statistic <- cbind('model'=c('model-1','model-2','model-3','model-4','model-5','model-6','model-7','model-8'),rmse_df,PersonSig_df,r2_df,adjR2_df,F_df,prd_df)
+
+kable(model_statistic, "html") %>%
+  kable_styling(bootstrap_options = c("striped", "bordered", "hover", "condensed"),full_width = F)
+```
+
+Multicollinearity test
+
+```{r}
+suppressMessages(suppressWarnings(library(olsrr)))
+
+for (i in 1:length(model_list)){
+  kable(ols_coll_diag(model_list[[i]])$vif_t, "html") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover","condensed"),full_width = F)
+  
+}
+
+kable(ols_coll_diag(model_list[[1]])$vif_t, "html") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover","condensed"),full_width = F)
+kable(ols_coll_diag(model_list[[2]])$vif_t, "html") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover","condensed"),full_width = F)
+kable(ols_coll_diag(model_list[[3]])$vif_t, "html") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover","condensed"),full_width = F)
+kable(ols_coll_diag(model_list[[4]])$vif_t, "html") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover","condensed"),full_width = F)
+kable(ols_coll_diag(model_list[[5]])$vif_t, "html") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover","condensed"),full_width = F)
+kable(ols_coll_diag(model_list[[6]])$vif_t, "html") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover","condensed"),full_width = F)
+kable(ols_coll_diag(model_list[[7]])$vif_t, "html") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover","condensed"),full_width = F)
+kable(ols_coll_diag(model_list[[8]])$vif_t, "html") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover","condensed"),full_width = F)
+
+
+
+
+```
+
+
+```{r}
+test_addWIN <- test
+test_addWIN$TARGET_WINS <-  rep(0,nrow(test))
+test_addWIN <- test_addWIN[,c(1,17,seq(2,16))]
+test_clean <- test_addWIN[,-which(names(test) %in% c( "TEAM_PITCHING_H","TEAM_PITCHING_HR","TEAM_PITCHING_BB","TEAM_PITCHING_SO","TEAM_BASERUN_CS",'TEAM_BATTING_HBP'))]
+
+# impute 5 data sets for the missing values in the data without removal of some records
+impData_test <- mice(test_clean, m=5, printFlag=FALSE, meth="sample", maxit=50,seed=500)
+
+#compare the distributions of original and imputed data
+#densityplot(impData_test)
+
+# get back the completed dataset where the missing values have been replaced with the imputed values in the first of the five datasets
+test_cln_im <- complete(impData_test)
+
+test_new <- test_cln_im 
+# calculate TB
+test_new$TEAM_BATTING_TB <- test_new$TEAM_BATTING_H + test_new$TEAM_BATTING_2B + 2* test_new$TEAM_BATTING_3B +3*test_new$TEAM_BATTING_HR
+
+# calculate AB
+test_new$TEAM_BATTING_AB <- test_new$TEAM_BATTING_H/((0.26+0.275)/2)
+
+# calculate basic RC
+test_new$RC_b <-((test_new$TEAM_BATTING_H + test_new$TEAM_BATTING_BB)*test_new$TEAM_BATTING_TB)/(test_new$TEAM_BATTING_AB +test_new$TEAM_BATTING_BB)
+
+# get the significant variables to form new data sets
+
+test_newv <- test_new[,which(names(test_new) %in% c("INDEX", "TARGET_WINS","TEAM_BATTING_SO","TEAM_FIELDING_E","TEAM_FIELDING_DP","RC_b"))]
+
+# View the distribution before the transformation
+par(mfrow=c(2,2))
+for(i in 2:dim(test_newv)[2]){
+  hist(test_newv[,i], probability = T, xlab = '', main = colnames(test_newv)[i])
+  d <- density(test_newv[,i],na.rm= T)
+  lines(d,col = 'red')
+}
+
+
+suppressWarnings(suppressMessages(library(MASS)))
+
+Box <- boxcox(test_newv$TEAM_FIELDING_E ~ 1,              # Transform X as a single vector
+             lambda = seq(-1.5,1.5,0.1)      # Try values -1.5 to 1.5 by 0.1
+             )
+
+Cox <- data.frame(Box$x, Box$y)            # Create a data frame with the results
+
+Cox2 <- Cox[with(Cox, order(-Cox$Box.y)),] # Order the new data frame by decreasing y
+
+Cox2[1,]                                  # Display the lambda with the greatest
+                                          #    log likelihood
+
+(lambda <- Cox2[1, "Box.x"])   # Extract that lambda
+
+#transform
+test_newv$newv_E_tr <- (test_newv$TEAM_FIELDING_E^lambda - 1) / lambda
+
+
+# View the distribution before and after the transformation
+par(mfrow = c(2, 2))
+hist(test_newv$TEAM_FIELDING_E,main='TEAM_FIELDING_E')
+hist(test_newv$newv_E_tr, main='transformed TEAM_FIELDING_E')
+
+par(mfrow = c(2, 2))
+qqnorm(test_newv$TEAM_FIELDING_E) 
+qqline(test_newv$TEAM_FIELDING_E, col = 2)
+qqnorm(newv_E_tr) 
+qqline(newv_E_tr, col = 2)
+
+# remove outliers
+test_fatures <- c( "INDEX","TARGET_WINS","TEAM_BATTING_SO", "TEAM_FIELDING_DP", "RC_b","newv_E_tr")
+
+# subsetting data sets for different each model
+test_newv_sub <- test_newv[,which(names(test_newv) %in% test_fatures)]
+
+
+# find out the outliers in all data sets prepraed for different models
+out_newv_test <- lapply(test_newv_sub, function(x) boxplot.stats(x)$out)
+
+rm_out <- function(dt,out_list){
+  for(i in 1:dim(dt)[2]){
+    if (length(unlist(out_list[names(out_list)[i]])) !=0){
+      dt <- dt[-which(dt[,names(out_list)[i]] %in% unlist(out_list[names(out_list)[i]])),]
+    }
+  }
+  return(dt)
+}
+
+test_newv_ro <-rm_out(test_newv_sub,out_newv_test)
+
+
+#predicted <- predict(fitmd_5,data=test_newv_ro)
+
+test_prd <- test_newv_ro
+
+test_prd$TARGET_WINS <- 522.87085 - 0.01643*test_newv_ro$TEAM_BATTING_SO - 0.12421*test_newv_ro$TEAM_FIELDING_DP + 0.07831*test_newv_ro$RC_b - 434.61572*test_newv_ro$newv_E_tr
+
+kable(head(test_prd,10), "html") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered", "hover","condensed"),full_width = F)
+
+write.csv(test_prd, " moneyball-evaluation-pred.csv")
+```
+
+
+
+
