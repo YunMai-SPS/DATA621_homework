@@ -1,0 +1,1026 @@
+---
+title: "YunMai_data621_Assignment3"
+author: "Yun Mai"
+date: "March 30, 2018"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+In this homework assignment, you will explore, analyze and model a data set containing information on crime for various neighborhoods of a major city. Each record has a response variable indicating whether or not the crime rate is above the median crime rate (1) or not (0).
+
+## Goals
+
+Build a binary logistic regression model on the training data set to predict whether the neighborhood will be at risk for high crime levels.
+Provide classifications and probabilities for the evaluation data set using your binary logistic regression model. 
+
+## Specification
+
+Only the variables given (or, variables that you derive from the variables provided) could be used in to modeling.
+
+Below is a short description of the variables of interest in the data set:
+
+. zn: proportion of residential land zoned for large lots (over 25000 square feet) (predictor variable)
+
+. indus: proportion of non-retail business acres per suburb (predictor variable)
+
+. chas: a dummy var. for whether the suburb borders the Charles River (1) or not (0) (predictor variable)
+
+. nox: nitrogen oxides concentration (parts per 10 million) (predictor variable)
+
+. rm: average number of rooms per dwelling (predictor variable)
+
+. age: proportion of owner-occupied units built prior to 1940 (predictor variable)
+
+. dis: weighted mean of distances to five Boston employment centers (predictor variable)
+
+. rad: index of accessibility to radial highways (predictor variable)
+
+. tax: full-value property-tax rate per $10,000 (predictor variable)
+
+. ptratio: pupil-teacher ratio by town (predictor variable)
+
+. lstat: lower status of the population (percent) (predictor variable)
+
+. medv: median value of owner-occupied homes in $1000s (predictor variable)
+
+. target: whether the crime rate is above the median crime rate (1) or not (0) (response variable)
+
+. A write-up submitted in PDF format. Your write-up should have four sections. Each one is described below. You may assume you are addressing me as a fellow data scientist, so do not need to shy away from technical details.
+
+. Assigned prediction (probabilities, classifications) for the evaluation data set. Use 0.5 threshold. Include your R statistical programming code in an Appendix.
+
+```{r}
+suppressMessages(suppressWarnings(library(knitr)))
+suppressMessages(suppressWarnings(library(ggplot2)))
+suppressMessages(suppressWarnings(library(kableExtra)))
+suppressMessages(suppressWarnings(library(formattable)))
+suppressMessages(suppressWarnings(library(dplyr)))
+
+suppressMessages(suppressWarnings(library(caret)))
+suppressMessages(suppressWarnings(library(pROC)))
+
+```
+
+### 1. DATA EXPLORATION
+
+```{r}
+# load the data 
+crime_train <- read.csv('https://raw.githubusercontent.com/YunMai-SPS/DATA621_homework/master/data621_assignment3/crime-training-data_modified.csv')
+
+crime_test <- read.csv('https://raw.githubusercontent.com/YunMai-SPS/DATA621_homework/master/data621_assignment3/crime-evaluation-data_modified.csv')
+```
+
+#### 1.1 Summarizing the dataset
+
+In table 1, we can see the sample size of each variables, the missing data, the range of the value of each variable. The missing data here are actually 0s which are the real values for binary data set. There is no data missing as number of NA is 0 for each variable.  
+
+```{r}
+suppressMessages(suppressWarnings(library(pastecs)))
+options(scipen = 100)
+options(digits = 2)
+
+kable(stat.desc(crime_train), "html") %>%
+  kable_styling(bootstrap_options = c("bordered", "hover", "condensed"),full_width = F)
+
+suppressMessages(suppressWarnings(library(stringr)))
+
+a <- str_extract_all(summary(crime_train),":.\\d+\\.\\d+|:.\\d+ \\.\\d+|:.\\d+|:. \\d+|:.  \\d+|:\\d+\\.\\d+")
+b <- str_replace_all(a,":", '')
+(sum_df <- as.data.frame(matrix(unlist(b), nrow = 6, byrow = F)))
+
+colnames(sum_df) <- colnames(crime_train)
+rownames(sum_df) <- c('Min.','1st Qu.','Median','Mean','3rd Qu.','Max')
+
+kable(sum_df, "html") %>%
+  kable_styling(bootstrap_options = c("bordered", "hover", "condensed"),full_width = F)
+```
+
+#### 1.2 Distribution of the variables
+
+```{r}
+par(cex.axis=0.9, cex.lab=1, las = 1,mar=c(2,10,2,1)+.1)
+boxplot(crime_train[,-which(names(crime_train) %in% c('target','chas','tax','nox','rm'))],horizontal = T)
+
+par(mfrow=c(1,3))
+boxplot(crime_train[,c('tax')],main='tax')
+boxplot(crime_train[,c('nox')],main='nox')
+boxplot(crime_train[,c('rm')],main='rm')
+```
+
+
+```{r}
+
+prop.table(table(crime_train$target))
+```
+
+This tells us that 51% of our data contains crimes. This is indicated crime is not a rare event.
+
+```{r}
+
+bp_df <- crime_train[,-which(names(crime_train)=='chas')]
+
+par(mfrow=c(3,4),oma=c(1,1,0,0), mar=c(2,1,1,0), tcl=-0.01, mgp=c(5,1,0))
+for(i in 1:(length(bp_df)-1)){
+  boxplot(bp_df[,i]~bp_df[,'target'],main = colnames(bp_df)[i])
+}
+
+
+```
+
+```{r}
+par(mfrow=c(5,3),oma=c(1,1,0,0), mar=c(2,1,1,0), tcl=-0.01, mgp=c(5,1,0))
+for(i in 1:13){
+  hist(crime_train[,i], probability = T, xlab = '', main = colnames(crime_train)[i])
+  d <- density(crime_train[,i],na.rm= T)
+  lines(d,col = 'red')
+}
+
+
+```
+
+From the boxplots and histograms, we can see that the distribution of zn, indus, nox, age, dis, rad, tax and ptratio are quite skewed. 
+
+
+```{r}
+#Plot matrix of all variables.
+plot(crime_train, pch=16, col="black", main="Matrix Scatterplot for crime_train")
+```
+
+#### 1.3 collinearity 
+
+```{r}
+# Plot a correlation graph
+suppressMessages(suppressWarnings(library(corrplot)))
+
+# calculate Pearson correlation between predictors.
+traincor <- cor(crime_train[,-which(names(crime_train)=='target')],use = "na.or.complete")
+
+corrplot(traincor, method = "number",number.cex = .57)
+#corr
+```
+
+Or
+```{r}
+library(PerformanceAnalytics)
+
+chart.Correlation(crime_train, 
+                  method="spearman",
+                  histogram=TRUE,
+                  pch=16)
+```
+
+
+**VIF test**
+```{r}
+# copy these files in the working directory and source the code for vif function
+source(file = "HighstatLibV6.R")
+
+corvif_noCorr <- function(dataz) {
+    dataz <- as.data.frame(dataz)
+    # correlation part cat('Correlations of the variables\n\n') tmp_cor <-
+    # cor(dataz,use='complete.obs') print(tmp_cor)
+
+    # vif part
+    form <- formula(paste("fooy ~ ", paste(strsplit(names(dataz), " "), collapse = " + ")))
+    dataz <- data.frame(fooy = 1, dataz)
+    lm_mod <- lm(form, dataz)
+
+    cat("\n\nVariance inflation factors\n\n")
+    print(myvif(lm_mod))
+}
+
+thinXwithVIF = function(X, Threshold = 3) {
+    VIFS = corvif(X)
+    XVars = names(X)
+    max(VIFS$GVIF)
+    while (max(VIFS$GVIF) >= Threshold) {
+        print(paste("Drop ", XVars[which.max(VIFS$GVIF)], ".", sep = ""), quote = FALSE)
+        XVars = XVars[-which.max(VIFS$GVIF)]
+        X = X[, -which.max(VIFS$GVIF)]
+        VIFS = corvif_noCorr(X)
+        print(max(VIFS$GVIF))
+    }
+    return(list(VIFS = VIFS, XVars = XVars, X = X))
+}
+
+
+Threshold <- 4
+thinXwithVIF(crime_train[,-which(names(crime_train)=='target')], Threshold)
+```
+
+
+```{r}
+Cor <- cor(crime_train[,-13])
+suppressMessages(suppressWarnings(library(caret)))
+(highCor <- findCorrelation(Cor, cutoff = 0.75))
+```
+
+Using the same cutoff, the find Correlation function suggests to remove two more variables, indus and age, comparing to the VIF test. I will keep these two variables for now because these two variables could be important for building the model. Maybe the area where there are more non-retail business acres and more very old houses have more crime. 
+
+
+
+### 2. DATA PREPARATION
+
+#### 2.1 Take care of the collinearities
+
+#### 2.1.1 Center the variables and test the collinearities again.
+
+```{r}
+center_df <- crime_train
+center_df$tax_ct <- scale(center_df$tax,scale = F)
+center_df$nox_ct <- scale(center_df$nox,scale = F)
+
+Threshold <- 4
+thinXwithVIF(center_df[,-which(names(center_df)%in% c('target','tax','nox'))], Threshold)
+```
+
+Centering the variables tax and nox does not change the collinearities. 
+
+#### 2.1.2 Whether transformation will help in reduce the collinearities?
+
+
+```{r}
+trsf_df <- crime_train
+trsf_df$l.tax <- log(trsf_df[,'tax'])
+trsf_df$l.nox  <- log(trsf_df[,'nox'])
+
+Threshold <- 4
+thinXwithVIF(trsf_df[,-which(names(trsf_df)%in% c('target','tax','nox'))], Threshold)
+
+```
+
+Log transformation of the variables tax and nox does not change the collinerities. 
+
+#### 2.1.3 Make a new variable for the operational purposes?
+
+From the correlation matrix, we can see that tax is highly related to indus and rad and that nox is highly related to indus, age, and dis (cor above 0.74). It make sense that nitrogen oxide levels is higher in the industry area and the neighborhood with the larger amount of old houses using heating system that will generate more waste. It is reasonable that full-value property-tax rate is higher in industry area and the places near radical highways.  
+
+Keeping tax and nox make cause the model unstable since they show high correlations with some other variables. It is possible that they carry the redundant information. But they could also have information useful for building the model. So I will combine these two variables. Since these two variables seems affecting the crime rate in opposite directions, I will do the subtraction.
+
+
+```{r}
+trsf_df <- crime_train
+trsf_df[,'pollution'] <- trsf_df$nox*1000 - trsf_df$tax
+
+Threshold <- 4
+thinXwithVIF(trsf_df[,-which(names(trsf_df) %in% c('tax','nox','target'))], Threshold)
+```
+
+
+Check the distribution of the new variable.
+```{r}
+par(mfrow=c(1,2))
+boxplot(trsf_df[,'pollution']~trsf_df[,'target'],main = 'pollution')
+hist(trsf_df[,'pollution'], probability = T, xlab = '', main = 'pollution')
+d <- density(trsf_df[,'pollution'],na.rm= T)
+lines(d,col = 'red')
+```
+
+
+#### 2.2 Log or quadratic transformation for the predictor variables
+
+#### 2.2.1 Marginal model plots 
+
+Use the marginal model plots to check whether there is a need to add extra predictor terms.
+
+```{r}
+Y <- cbind(trsf_df$target)
+X <- trsf_df[,which(names(trsf_df) %in% c("zn",  "indus", "chas", "tax","nox","rm", "age", "dis",  "rad",  "ptratio", "lstat", "medv"))]
+
+logit.ori <- glm(paste('target ~',paste(names(X),collapse = "+")),trsf_df, family=binomial(link = 'logit'))
+
+suppressMessages(suppressWarnings(library(alr3)))
+mmps(logit.ori,vars=~.,fitted=TRUE, ask=F)
+```
+ 
+The model and the data agree to each other quite well for each predictor. There is no need to transform any predictor variable by looking at the plots. 
+
+But The boxplots for the predictor variables show some predictors are skewed. Usually, the right skewed variables (zn, dis and lstat) will need log transformation and the left skewed variables (indus, age, rad and ptratio) quadratic transformation. 
+
+Before doing the transformation, use residual plots to check which predictors need transformation.
+
+#### 2.2.2 Residual plots
+
+Use the residuals to check whether there is a need to add extra predictor terms.
+```{r}
+X.minus <- trsf_df[,which(names(trsf_df) %in% c("zn",  "indus", "chas", "rm", "age", "dis",  "rad",  "ptratio", "lstat", "medv","pollution"))]
+
+logit.minus <- glm(paste('target ~',paste(names(X.minus),collapse = "+")),trsf_df, family=binomial(link = 'logit'))
+
+#residual plots for all of the original predictor viriables
+residualPlots(logit.ori, layout = c(3, 4),ask=F) 
+
+#residual plots for the set of predictor viriables without tax and nox but with combined variable pollution
+residualPlots(logit.minus, layout = c(3, 4),ask=F) 
+
+```
+
+The residual plots results are different for the original predictor list and the new predictors set with combined variable pollution. I will do the transformation based on the latter results. Usually, the right skewed variables like zn will need log transformed and the left skewed variables like indus, age , ptratio will be quadratic transformed. I will quadratic transformation for those not skewed variables rm, medv and pollution. Because there are a lot of 0 in zn, I shift zn 1 unit to the right.
+
+After transformation, the residual plots and the statistical results show as follows. There is no significant relationship between the residuals with each predictor.
+
+```{r}
+logit.trsf <- glm(target ~ zn+indus+chas+rm+age+dis+rad+ptratio+lstat+medv+pollution+log(zn+1)+I(indus^2)+I(rm^2)+I(age^2)+I(ptratio^2)+I(medv^2)+I(pollution^2),trsf_df, family=binomial(link = 'logit'))
+
+residualPlots(logit.trsf, layout = c(3, 4),ask=F) 
+
+```
+
+Then generate new columns for the transformed variables for convenience purpose.
+```{r}
+trsf_df$l.zn <- log(trsf_df[,'zn']+1)
+
+trsf_df$q.indus  <- (trsf_df[,'indus'])^2
+trsf_df$q.rm <- (trsf_df[,'rm'])^2
+trsf_df$q.age  <- (trsf_df[,'age'])^2
+trsf_df$q.ptratio  <- (trsf_df[,'ptratio'])^2
+trsf_df$q.medv  <- (trsf_df[,'medv'])^2
+trsf_df$q.pollution  <- (trsf_df[,'pollution'])^2
+
+kable(head(trsf_df,5))
+```
+
+l.zn q.indus q.rm q.age q.ptratio q.medv q.pollution
+
+
+
+### 3. BUILD MODELS
+
+#### 3.1 Ordinary least squares regression model - backward selection
+
+**Build the model**
+
+First I want to see what will linear regression model do just for fun.
+
+```{r}
+Y <- cbind(trsf_df$target)
+
+X1 <- trsf_df[,which(names(trsf_df) %in% c("zn",  "indus",   "chas", "rm", "age", "dis",  "rad",  "ptratio", "lstat", "medv" ,"pollution", "l.zn",  "q.indus", "q.rm", "q.age","q.ptratio", "q.medv", "q.pollution"))]
+
+
+# OLS regression cofficients
+olsreg <- lm(paste('target ~',paste(names(X1),collapse = "+")),trsf_df)
+
+olsfit_1 <- step(olsreg,direction="backward",trace=FALSE)
+#coef(olsfit_1)
+summary(olsfit_1)
+
+#diagnostic plots for linear regression
+par(mfrow=c(2,2))
+plot(olsfit_1)
+```
+
+Residual plots are problematic when the data are binary. Residual does not provide an assessment of the goodness-of-fit of model. Then I use the marginal model plots to evaluate the goodness-of-fit. 
+
+```{r}
+#diagnostic plots for binary response
+suppressMessages(suppressWarnings(library(alr3)))
+suppressMessages(suppressWarnings(library(car)))
+mmps(olsfit_1,smoother.args=list(smoother = loessLine,span=2/3),ask=F)
+#mmps(olsfit_1,smoother.args=list(list(smoother=gamLine, k=3)),ask=F)
+```
+
+From the bottom right-hand plot which uses these fitted values as the horizontal axis, we can see that the two lines do not agree to each other. The model is not reproducing the data in that direction. So I conclude that ordinary linear regression is not a right tool to fit the data with binary response. logistic or Poisson will be appropriate link functions.
+
+
+#### 3.2 logistic regression model - likelihood-ratio-test-based backward selection
+
+**Build the model**
+```{r}
+Y <- cbind(trsf_df$target)
+
+X1 <- trsf_df[,which(names(trsf_df) %in% c("zn",  "indus",   "chas", "rm", "age", "dis",  "rad",  "ptratio", "lstat", "medv" ,"pollution", "l.zn",  "q.indus", "q.rm", "q.age"," q.ptratio", "q.medv", "q.pollution"))]
+
+#Create a full and null logistic models
+logit.full <- glm(paste('target ~',paste(names(X1),collapse = "+")), trsf_df, family=binomial(link = 'logit'))
+logit.null <- glm(target ~ 1, trsf_df, family=binomial(link = 'logit'))
+
+#Manual likelihood-ratio-test-based backward selection
+(drop1(logit.full, test = "LRT"))
+# zn is least significant
+(drop1(update(logit.full, ~ . -zn), test = "LRT"))
+# dis is least significant
+(drop1(update(logit.full, ~ . -zn -dis), test = "LRT"))
+# lstat is least significant
+(drop1(update(logit.full, ~ . -zn -dis -lstat), test = "LRT"))
+# chas is least significant
+(drop1(update(logit.full, ~ . -zn -dis -lstat -chas), test = "LRT"))
+# medv is least significant
+(drop1(update(logit.full, ~ . -zn -dis -lstat -chas -medv), test = "LRT"))
+# q.medv is least significant
+(drop1(update(logit.full, ~ . -zn -dis -lstat -chas -medv -q.medv), test = "LRT"))
+# age is least significant
+(drop1(update(logit.full, ~ . -zn -dis -lstat -chas -medv -q.medv -age), test = "LRT"))
+# l.zn is least significant
+(drop1(update(logit.full, ~ . -zn -dis -lstat -chas -medv -q.medv -age -l.zn), test = "LRT"))
+
+#the result model
+logitfit.1 <- update(logit.full, ~ .  -zn -dis -lstat -chas -medv -q.medv -age -l.zn)
+
+summary(logitfit.1)
+
+residualPlots(logitfit.1, layout = c(3, 4),ask=F) 
+
+mmps(logitfit.1,ask=F)
+
+```
+
+residualPlots() function performs lack-of-fit test to see if a variable has relationship with residuals. From the plots we can see the relationship between Pearson residuals and each variable is linear. 
+
+**Evaluation of the model**
+```{r}
+suppressMessages(suppressWarnings(library(MASS)))
+# goodness of fit: pseudo R squared
+(pR2_1 <- 1 - logitfit.1$deviance / logitfit.1$null.deviance)
+
+#or
+#(pR2 <- 1- logLik(logitfit.1)/logLik(logit.null))
+ 
+# AIC
+extractAIC(logitfit.1 )
+
+# confusion matrix
+clsdf_1 <- data.frame(trsf_df$target)
+clsdf_1$pre.prob <- predict( logitfit.1, newdata = trsf_df ,type = "response")
+clsdf_1$pre.target <- ifelse(clsdf_1$pre.prob>0.5, 1,0)
+clsdf_1$pre.target <- as.factor(clsdf_1$pre.target)
+names(clsdf_1)[names(clsdf_1)=='trsf_df.target'] <- 'target'
+
+#X.test <- trsf_df[,-which(names(trsf_df)=='target')]
+#X.test <- X.test[,which(names(X.test) %in% c('medv', 'q.medv', 'zn', 'l.zn', 'dis', 'chas', 'lstat', 'age'))]
+#y_predicted <- predict(logitfit.1, newx = as.matrix(X.test))
+
+suppressMessages(suppressWarnings(library(caret)))
+cfmx_1 <- confusionMatrix(data = clsdf_1$pre.target, reference = clsdf_1$target, positive = "1")
+
+(cfmx_1$table)
+(acrcy_1 <- cfmx_1$overall['Accuracy'])
+(err_rate_1 <- 1-cfmx_1$overall['Accuracy'])
+(preci_1 <- cfmx_1$byClass['Precision'])
+(sensi_1 <- cfmx_1$byClass['Sensitivity'])
+(speci_1 <- cfmx_1$byClass['Specificity'])
+(F1_1 <- cfmx_1$byClass['F1'])
+
+# ROC and AUC
+suppressMessages(suppressWarnings(library(ROCR)))
+rocCurve_1 <- roc(response = clsdf_1$target,
+ predictor = clsdf_1$pre.prob,
+ levels = rev(levels(as.factor(clsdf_1$target))))
+
+plot(rocCurve_1, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_1 <- pROC::auc(rocCurve_1),'\n\n')
+
+ci_1 <- ci(rocCurve_1)
+```
+
+
+#### 3.3 Logistic regression model - Automated likelihood-ratio-test-based backward selection
+
+**Build the model**
+```{r}
+suppressMessages(suppressWarnings(library(rms)))
+
+lrm.full <- lrm(target ~ zn+indus+chas+rm+age+dis+rad+ptratio+lstat+medv+pollution+l.zn+q.indus+q.rm+q.age+q.ptratio+q.medv+q.pollution,data=data.frame(scale(trsf_df)),maxit=50)
+
+
+fastbw(lrm.full, rule = "p", sls = 0.1)
+logitfit.2 <- glm(target ~ indus+rm+rad+ ptratio+pollution+
+ q.indus+q.rm+q.ptratio+q.pollution,trsf_df, family=binomial(link = 'logit'))
+summary(logitfit.2)
+
+residualPlots(logitfit.2, layout = c(3, 4),ask=F) 
+
+mmps(logitfit.2,ask=F)
+
+```
+
+**Evaluation of the model**
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_2 <- 1 - logitfit.2$deviance / logitfit.2$null.deviance)
+
+# AIC
+extractAIC(logitfit.2 )
+
+# confusion matrix
+clsdf_2 <- data.frame(trsf_df$target)
+clsdf_2$pre.prob <- predict( logitfit.2, newdata = trsf_df ,type = "response")
+clsdf_2$pre.target <- ifelse(clsdf_2$pre.prob>0.5, 1,0)
+names(clsdf_2)[names(clsdf_2)=='trsf_df.target'] <- 'target'
+
+cfmx_2 <- confusionMatrix(data = clsdf_2$pre.target, reference = clsdf_2$target, positive = "1")
+
+(cfmx_2$table)
+(acrcy_2 <- cfmx_2$overall['Accuracy'])
+(err_rate_2 <- 1-cfmx_2$overall['Accuracy'])
+(preci_2 <- cfmx_2$byClass['Precision'])
+(sensi_2 <- cfmx_2$byClass['Sensitivity'])
+(speci_2 <- cfmx_2$byClass['Specificity'])
+(F1_2 <- cfmx_2$byClass['F1'])
+
+# ROC and AUC
+rocCurve_2 <- roc(response = clsdf_2$target,
+ predictor = clsdf_2$pre.prob,
+ levels = rev(levels(as.factor(clsdf_2$target))))
+
+plot(rocCurve_2, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_2 <- pROC::auc(rocCurve_2),'\n\n')
+
+ci_2 <- ci(rocCurve_2)
+```
+
+
+#### 3.4 Logistic regression model - AIC-based automated enumeration approach
+
+**Build the model**
+```{r}
+logitfit.3 <- step(logit.full, direction = "backward", trace = 0)
+
+summary(logitfit.3)
+
+residualPlots(logitfit.3, layout = c(3, 4),ask=F) 
+
+mmps(logitfit.3,ask=F)
+
+```
+
+**Evaluation of the model**
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_3 <- 1 - logitfit.3$deviance / logitfit.3$null.deviance)
+
+# AIC
+extractAIC(logitfit.3 )
+
+# confusion matrix
+clsdf_3 <- data.frame(trsf_df$target)
+clsdf_3$pre.prob <- predict( logitfit.3, newdata = trsf_df ,type = "response")
+clsdf_3$pre.target <- ifelse(clsdf_3$pre.prob>0.5, 1,0)
+names(clsdf_3)[names(clsdf_3)=='trsf_df.target'] <- 'target'
+
+cfmx_3 <- confusionMatrix(data = clsdf_3$pre.target, reference = clsdf_3$target, positive = "1")
+
+(cfmx_3$table)
+(acrcy_3 <- cfmx_3$overall['Accuracy'])
+(err_rate_3 <- 1-cfmx_3$overall['Accuracy'])
+(preci_3 <- cfmx_3$byClass['Precision'])
+(sensi_3 <- cfmx_3$byClass['Sensitivity'])
+(speci_3 <- cfmx_3$byClass['Specificity'])
+(F1_3 <- cfmx_3$byClass['F1'])
+
+# ROC and AUC
+rocCurve_3 <- roc(response = clsdf_3$target,
+ predictor = clsdf_3$pre.prob,
+ levels = rev(levels(as.factor(clsdf_3$target))))
+
+plot(rocCurve_3, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_3 <- pROC::auc(rocCurve_3),'\n\n')
+
+ci_3 <- ci(rocCurve_3)
+```
+
+#### 3.5 Logistic regression model -  Penalized method
+ 
+I got warning message "glm.fit: fitted probabilities numerically 0 or 1 occurred" while doing manually likelihood-ratio-test-based backward selection. I still get the model but the coefficient estimates will be inflated. To avoid this problem, I try penalized regression by applying glmnet package. glmnet package fits a generalized linear model via penalized maximum likelihood. The object of the regression is to a model with the smallest number of coefficients that also gives a good accuracy. The hyperparameter lambda (lambda.1se) gives the simplest model but also lies within one standard error of the optimal value of lambda. This value of lambda is what will be used in the the future computation. Here, cv.glmnet function will do k-fold cross-validation to automatically find a value for the value of lambda.
+
+**build the model**
+```{r}
+suppressMessages(suppressWarnings(library(glmnet)))
+
+#perform grid search to find optimal value of lambda
+#family= binomial => logistic regression, alpha=1 => lasso, deviance => logistic and poisson regression
+logitfit.4 <- cv.glmnet(as.matrix(X1),Y,alpha=1,family="binomial",type.measure="deviance")
+summary(logitfit.4)
+
+#cv.glmnet() uses cross-validation to work out how well each model generalises, which we can visualise as:
+plot(logitfit.4,label=TRUE)
+
+```
+
+The plot shows that the log of the optimal value of lambda (i.e. the one that minimises the root mean square error) is approximately -8. 
+
+```{r}
+#min value of lambda
+(lambda_min <- logitfit.4$lambda.min)
+#best value of lambda
+(lambda_1se <- logitfit.4$lambda.1se)
+
+```
+
+Extract the lambda value from the model then  lambda. min =  0.00044. lambda.1se = 0.0018.
+
+```{r}
+#regression coefficients
+coef(logitfit.4,s=lambda_1se)
+```
+
+**Evaluation of the model**
+```{r}
+trsf_test <- crime_train
+trsf_test[,'pollution'] <- trsf_test$nox*1000 - trsf_test$tax
+
+trsf_test$l.zn <- log(trsf_test[,'zn']+1)
+
+trsf_test$q.indus  <- (trsf_test[,'indus'])^2
+trsf_test$q.rm  <- (trsf_test[,'rm'])^2
+trsf_test$q.age  <- (trsf_test[,'age'])^2
+trsf_test$q.ptratio  <- (trsf_test[,'ptratio'])^2
+trsf_test$q.medv  <- (trsf_test[,'medv'])^2
+trsf_test$q.pollution  <- (trsf_test[,'pollution'])^2
+
+X.test <- trsf_test[,-which(names(trsf_test)=='target')]
+X.test <- X.test[,which(names(X.test) %in% names(X1))]
+
+y_predicted <- predict(logitfit.4, s = lambda_1se, newx = as.matrix(X.test),type="response")
+
+# goodness of fit: pseudo R squared
+(pR2_4 <- logitfit.4$glmnet.fit$dev.ratio[which(logitfit.4$glmnet.fit$lambda == logitfit.4$lambda.1se)] )
+
+k <- logitfit.4$glmnet.fit$df[which(logitfit.4$glmnet.fit$lambda == logitfit.4$lambda.1se)]
+n <- 466
+nulldev <- logit.null$null.deviance
+dev.ratio <- logitfit.4$glmnet.fit$dev.ratio[which(logitfit.4$glmnet.fit$lambda == logitfit.4$lambda.1se)]
+devs <- (1-dev.ratio)*nulldev
+AICc <- -(nulldev-devs)+2*k+2*k*(k+1)/(n-k-1)
+
+# confusion matrix
+clsdf_4 <- data.frame(trsf_df$target)
+clsdf_4$pre.prob <- y_predicted 
+clsdf_4$pre.target <- ifelse(clsdf_4$pre.prob>0.5, 1,0)
+names(clsdf_4)[names(clsdf_4)=='trsf_df.target'] <- 'target'
+
+cfmx_4 <- confusionMatrix(data = clsdf_4$pre.target, reference = clsdf_4$target, positive = "1")
+
+(cfmx_4$table)
+(acrcy_4 <- cfmx_4$overall['Accuracy'])
+(err_rate_4 <- 1-cfmx_4$overall['Accuracy'])
+(preci_4 <- cfmx_4$byClass['Precision'])
+(sensi_4 <- cfmx_4$byClass['Sensitivity'])
+(speci_4<- cfmx_4$byClass['Specificity'])
+(F1_4 <- cfmx_4$byClass['F1'])
+
+# ROC and AUC
+rocCurve_4 <- roc(response = clsdf_4$target,
+ predictor = clsdf_4$pre.prob,
+ levels = rev(levels(as.factor(clsdf_4$target))))
+
+#rocCurve[['sensitivities']]
+#rocCurve[['specificities']]
+#rocCurve[['thresholds']]
+
+plot(rocCurve_4, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_4 <- pROC::auc(rocCurve_4),'\n\n')
+
+ci_4 <- ci(rocCurve_4)
+
+```
+
+
+#### 3.6 Logistic regression model - AIC-based bestglm
+
+**Build the model**
+
+Because the memory is not big enough to do bestglm computation for more than 12 variables, I used to untransformed variables including nox and tax as initiate dataset to search for the best predictor variable set with bestglm function. I tried AIC-based method first and then try BIC-based method in the next section (3.7).
+```{r}
+suppressMessages(suppressWarnings(library(bestglm)))
+
+suppressMessages(suppressWarnings(library(dplyr)))
+Xy <-crime_train
+#Xy <-crime_train[,-which(names(crime_train) %in% c('tax','nox'))]
+names(Xy)[names(Xy)=='target'] <- 'y'
+Xy$y <- as.factor(Xy$y)
+#move y to the last column because bestglm take the last column as response variable
+Xy <- Xy%>%dplyr::select(-y,y)
+
+# Perform all-subset linear (logit) regression based on Akaike Information Criteria (AIC)
+bestfit <- bestglm(Xy, IC = "AIC",family = binomial)
+
+logitfit.5 <- glm(target ~ zn+age+nox+dis+rad+tax+ptratio+medv,family=binomial(link='logit'),crime_train)
+
+summary(bestfit$BestModel)
+
+residualPlots(logitfit.5, layout = c(3, 4),ask=F) 
+
+```
+
+There is statistically significant relationship between Pearson residuals and the predictor variables age, dis, ptratio and tax, suggesting adding the quadratic terms in previous models for age, dis, ptratio is reasonable.
+
+After testing, removing dis and quadratic dis will make the residual vs predictor variable reasonable. So the final model is:
+
+
+```{r}
+logitfit.5 <- glm(target ~ zn+age+nox+rad+ptratio+medv+I(age^2)+ I(ptratio^2),family=binomial(link='logit'),crime_train)
+summary(logitfit.5)
+residualPlots(logitfit.5, layout = c(3, 4),ask=F)  
+```
+
+The marginal model plots in below show the agreement between the model and the data. But because the existence of linear relationship between some predictors and the residual, the model is not optimal. 
+
+```{r}
+
+mmps(logitfit.5,ask=F)
+```
+
+**Evaluation of the model**
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_5 <- 1 - logitfit.5$deviance / logitfit.5$null.deviance)
+
+# AIC
+extractAIC(logitfit.5 )
+
+# confusion matrix
+clsdf_5 <- data.frame(trsf_df$target)
+clsdf_5$pre.prob <- predict( logitfit.5, newdata = trsf_df ,type = "response")
+clsdf_5$pre.target <- ifelse(clsdf_5$pre.prob>0.5, 1,0)
+names(clsdf_5)[names(clsdf_5)=='trsf_df.target'] <- 'target'
+
+cfmx_5 <- confusionMatrix(data = clsdf_5$pre.target, reference = clsdf_5$target, positive = "1")
+
+(cfmx_5$table)
+(acrcy_5<- cfmx_5$overall['Accuracy'])
+(err_rate_5 <- 1-cfmx_5$overall['Accuracy'])
+(preci_5 <- cfmx_5$byClass['Precision'])
+(sensi_5 <- cfmx_5$byClass['Sensitivity'])
+(speci_5<- cfmx_5$byClass['Specificity'])
+(F1_5 <- cfmx_5$byClass['F1'])
+
+# ROC and AUC
+rocCurve_5 <- roc(response = clsdf_5$target,
+ predictor = clsdf_5$pre.prob,
+ levels = rev(levels(as.factor(clsdf_5$target))))
+
+plot(rocCurve_5, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_5 <- pROC::auc(rocCurve_5),'\n\n')
+
+ci_5 <- ci(rocCurve_5)
+```
+
+
+
+#### 3.7 logistic regression model - BIC-based bestglm
+
+**Build the model**
+```{r}
+bestfit2 <- bestglm(Xy, IC = "BIC",family = binomial)
+summary(bestfit2$BestModel)
+
+logitfit.6<- glm(target ~ nox+rad+tax,family=binomial(link='logit'),crime_train)
+
+residualPlots(logitfit.6, layout = c(3, 4),ask=F) 
+```
+
+There is statistically significant relationship between Pearson residuals and the predictor variables tax. But adding  the quadratic terms for tax there is still significant relationship between the residual and tax and quadratic tax. So I remove tax and there is no significant relationship between the residual and  predictor variables anymore. But the model become too simple with only two predictor variables.
+
+```{r}
+logitfit.6<- glm(target ~ nox+rad,family=binomial(link='logit'),crime_train)
+summary(logitfit.6)
+
+residualPlots(logitfit.6, layout = c(3, 4),ask=F) 
+mmps(logitfit.6,ask=F)
+```
+
+**Evaluation of the model**
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_6 <- 1 - logitfit.6$deviance / logitfit.6$null.deviance)
+
+# AIC
+extractAIC(logitfit.6 )
+
+# confusion matrix
+clsdf_6 <- data.frame(trsf_df$target)
+clsdf_6$pre.prob <- predict( logitfit.6, newdata = trsf_df ,type = "response")
+clsdf_6$pre.target <- ifelse(clsdf_6$pre.prob>0.5, 1,0)
+names(clsdf_6)[names(clsdf_6)=='trsf_df.target'] <- 'target'
+
+cfmx_6 <- confusionMatrix(data = clsdf_6$pre.target, reference = clsdf_6$target, positive = "1")
+
+(cfmx_6$table)
+(acrcy_6 <- cfmx_6$overall['Accuracy'])
+(err_rate_6 <- 1-cfmx_6$overall['Accuracy'])
+(preci_6 <- cfmx_6$byClass['Precision'])
+(sensi_6 <- cfmx_6$byClass['Sensitivity'])
+(speci_6 <- cfmx_6$byClass['Specificity'])
+(F1_6 <- cfmx_6$byClass['F1'])
+
+# ROC and AUC
+rocCurve_6 <- roc(response = clsdf_6$target,
+ predictor = clsdf_6$pre.prob,
+ levels = rev(levels(as.factor(clsdf_6$target))))
+
+#rocCurve[['sensitivities']]
+#rocCurve[['specificities']]
+#rocCurve[['thresholds']]
+
+plot(rocCurve_6, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_6 <- pROC::auc(rocCurve_3),'\n\n')
+
+ci_6 <- ci(rocCurve_6)
+```
+
+
+#### 3.8 Logistic regression model - train model  
+
+**Build the model**
+```{r}
+suppressMessages(suppressWarnings(library(caret)))
+t1 <-train(X1,as.factor(Y),method='glm')
+
+#names(getModelInfo())
+#summary(t1$finalModel)
+
+logitfit.7 <- glm(target ~ zn+rm+rad+ptratio+pollution+q.indus+q.rm+q.ptratio+q.pollution,family=binomial(link='logit'),trsf_df)
+summary(logitfit.7)
+
+residualPlots(logitfit.7, layout = c(3, 4),ask=F) 
+
+```
+
+
+```{r}
+logitfit.7 <- glm(target ~ zn+rm+rad+ptratio+pollution+q.rm+q.ptratio+q.pollution,family=binomial(link='logit'),trsf_df)
+summary(logitfit.7)
+
+residualPlots(logitfit.7, layout = c(3, 4),ask=F) 
+mmps(logitfit.7,ask=F)
+```
+
+**Evaluation of the model**
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_7 <- 1 - logitfit.7$deviance / logitfit.7$null.deviance)
+
+# AIC
+extractAIC(logitfit.7 )
+
+# confusion matrix
+clsdf_7 <- data.frame(trsf_df$target)
+clsdf_7$pre.prob <- predict( logitfit.7, newdata = trsf_df ,type = "response")
+clsdf_7$pre.target <- ifelse(clsdf_7$pre.prob>0.5, 1,0)
+names(clsdf_7)[names(clsdf_7)=='trsf_df.target'] <- 'target'
+
+cfmx_7 <- confusionMatrix(data = clsdf_7$pre.target, reference = clsdf_7$target, positive = "1")
+
+(cfmx_7$table)
+(acrcy_7 <- cfmx_7$overall['Accuracy'])
+(err_rate_7 <- 1-cfmx_7$overall['Accuracy'])
+(preci_7 <- cfmx_7$byClass['Precision'])
+(sensi_7 <- cfmx_7$byClass['Sensitivity'])
+(speci_7 <- cfmx_7$byClass['Specificity'])
+(F1_7 <- cfmx_7$byClass['F1'])
+
+# ROC and AUC
+rocCurve_7 <- roc(response = clsdf_7$target,
+ predictor = clsdf_7$pre.prob,
+ levels = rev(levels(as.factor(clsdf_7$target))))
+
+#rocCurve[['sensitivities']]
+#rocCurve[['specificities']]
+#rocCurve[['thresholds']]
+
+plot(rocCurve_7, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_7 <- pROC::auc(rocCurve_3),'\n\n')
+
+ci_7 <- ci(rocCurve_7)
+```
+
+### 4 Select models
+
+(a) accuracy, (b) classification error rate, (c) precision, (d) sensitivity, (e) specificity, (f) F1 score, (g) AUC, and (h) confusion matrix.
+```{r}
+
+parameter.1 <- n-df.residual(logitfit.1)-1
+parameter.2 <- n-df.residual(logitfit.2)-1
+parameter.3 <- n-df.residual(logitfit.3)-1
+parameter.4 <- logitfit.4$glmnet.fit$df[which(logitfit.4$glmnet.fit$lambda == logitfit.4$lambda.1se)]
+parameter.5 <- n-df.residual(logitfit.5)-1
+parameter.6 <- n-df.residual(logitfit.6)-1
+parameter.7 <- n-df.residual(logitfit.7)-1
+
+performance_summary <- data.frame('model'=c('model.1 manually LRT','model.2 automatic LRT','model.3 AIC-backwards','model.4 LASSO','model.5 AIC-based bestglm','model.6 BIC-based bestglm','model.7 train model'),'accuracy'=c(acrcy_1,acrcy_2,acrcy_3,acrcy_4,acrcy_5,acrcy_6,acrcy_7),'error rate'= c(err_rate_1,err_rate_2,err_rate_3,err_rate_4,err_rate_5,err_rate_6,err_rate_7),'precision'=c(preci_1,preci_2,preci_3,preci_4,preci_5,preci_6,preci_7),'sensitivity'=c(sensi_1,sensi_2,sensi_3,sensi_4,sensi_5,sensi_6,sensi_7),'specificity'=c(speci_1,speci_2,speci_3,speci_4,speci_5,speci_6,speci_7),'F1'=c(F1_1,F1_2,F1_3,F1_4,F1_5,F1_6,F1_7),'pseudo-R2'=c(pR2_1,pR2_2,pR2_3,pR2_4,pR2_5,pR2_6,pR2_7),'AIC'=c(extractAIC(logitfit.1)[2],extractAIC(logitfit.2)[2],extractAIC(logitfit.3)[2],AICc,extractAIC(logitfit.5)[2],extractAIC(logitfit.6)[2],extractAIC(logitfit.7)[2]),'AUC'=c(auc_pROC_1,auc_pROC_2,auc_pROC_3,auc_pROC_4,auc_pROC_5,auc_pROC_6,auc_pROC_7),'number of predictor'=c(parameter.1,parameter.2,parameter.3,parameter.4,parameter.5,parameter.6,parameter.7))
+
+kable(performance_summary, "html") %>%
+  kable_styling(bootstrap_options = c("bordered", "hover", "condensed"),full_width = F)
+
+```
+
+Make predictions using the evaluation data set
+
+```{r}
+trsf_test <- crime_test
+trsf_test[,'pollution'] <- trsf_test$nox*1000 - trsf_test$tax
+trsf_test$l.zn <- log(trsf_test[,'zn']+1)
+
+trsf_test$q.indus  <- (trsf_test[,'indus'])^2
+trsf_test$q.rm <- (trsf_test[,'rm'])^2
+trsf_test$q.age  <- (trsf_test[,'age'])^2
+trsf_test$q.ptratio  <- (trsf_test[,'ptratio'])^2
+trsf_test$q.medv  <- (trsf_test[,'medv'])^2
+trsf_test$q.pollution  <- (trsf_test[,'pollution'])^2
+
+  
+trsf_test <- trsf_test[,which(names(trsf_test)%in%c('indus','rm','rad','ptratio','pollution','q.indus','q.rm','q.ptratio','q.pollution'))]  
+
+test_pre <- crime_test
+
+test_pre$pred.prob <- predict(logitfit.2, newdata = trsf_test ,type = "response")
+test_pre$pred.target <- ifelse(test_pre$pred.prob>0.5,1,0)
+
+kable(head(test_pre,10), "html") %>%
+  kable_styling(bootstrap_options = c("bordered", "hover", "condensed"),full_width = F)
+
+#write.csv(test_pre,'crime_test_predition.csv')
+
+```
+
+
+```{r,eval=F,echo=F}
+
+
+n <- nrow(trsf_df)
+parameter <- n-df.residual(logitfit.7)-1
+df.residual(logitfit.4)
+ll <- logLik(logitfit.2)
+attributes(ll)
+
+logit_logLik <- function(dummy,fitted_values){
+   # Description: Computes log-likelihood of a fitted
+   # logit model 
+
+   # Format variables
+   y <- as.matrix(dummy)
+   p <- as.matrix(fitted_values)
+   # Adjust dimensions
+   skip <- dim(y)[1] - dim(p)[1]
+   y    <- as.matrix(y[-c(1:skip),])
+
+   # Compute log-likelihood
+   item <- sapply(1:dim(y)[1], function(i)
+                          y[i,]*log(p[i,]) + (1-y[i,])*log(1-p[i,]))
+   return(sum(item))
+}
+
+cvfit2 <- glmnet::cv.glmnet(datam, fundm,alpha=1,nfolds=10)
+cf<-coef(cvfit2, s = "lambda.1se")
+i<-which(cvfit2$lambda == cvfit2$lambda.1se)
+e<-cvfit2$cvm[i]
+r2<-1-e/var(fundm)
+r2
+
+#The classic way via calculating the variance of the residuals:
+
+datam2<-as.matrix(datam)
+cc2<-as.matrix(cf[-1,]) #removing the intercept row
+predict<-datam2 %*% cc2
+err<-predict - fundm
+View(err)
+r2b<-1-var(err)/var(fundm)
+r2b
+
+#A glmnet object has components dev.ratio and nulldev. From the glmnet docs:
+
+#"The fraction of (null) deviance explained (for "elnet", this is the R-square)."
+
+```
+
+```{r,eval=F,echo=F}
+(logit.full <- glm(paste('target ~',paste(names(X2),collapse = "+")),trsf_df, family=binomial(link = 'logit')))
+# zn is least significant
+(logit.1 <- update(logit.full, ~ . -zn))
+(logit.2 <- update(logit.1, ~ . -indus))
+(logit.3 <- update(logit.2, ~ . -chas))
+(logit.4 <- update(logit.3, ~ . -rm))
+(logit.5 <- update(logit.4, ~ . -age))
+(logit.6 <- update(logit.5, ~ . -dis))
+(logit.7 <- update(logit.6, ~ . -rad))
+(logit.8 <- update(logit.7, ~ . -ptratio))
+(logit.9 <- update(logit.8, ~ . -lstat))
+(logit.10 <- update(logit.9, ~ . -medv))
+(logit.11 <- update(logit.10, ~ . -pollution))
+(logit.12 <- update(logit.11, ~ . -l.zn))
+(logit.13 <- update(logit.12, ~ . -l.dis))
+(logit.14 <- update(logit.13, ~ . -l.lstat))
+(logit.15 <- update(logit.14, ~ . -q.indus))
+(logit.16 <- update(logit.15, ~ . -q.age))
+(logit.17 <- update(logit.16, ~ . -q.rad))
+(logit.18 <- update(logit.17, ~ . -q.ptratio))
+
+
+### Use compare.glm to assess fit statistics.
+suppressMessages(suppressWarnings(library(rcompanion)))
+compareGLM(logit.full,logit.1, logit.2, logit.3, logit.4, logit.5, logit.6,logit.7,logit.8, logit.9,logit.10, logit.11, logit.12, logit.13, logit.14, logit.15,logit.16,logit.17,logit.18)
+```
+
