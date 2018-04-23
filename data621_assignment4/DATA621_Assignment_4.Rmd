@@ -1,0 +1,926 @@
+---
+title: "DATA621_Assignment_4"
+author: "Yun Mai"
+date: "April 19, 2018"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressMessages(suppressWarnings(library(knitr)))
+suppressMessages(suppressWarnings(library(ggplot2)))
+suppressMessages(suppressWarnings(library(kableExtra)))
+suppressMessages(suppressWarnings(library(formattable)))
+suppressMessages(suppressWarnings(library(dplyr)))
+suppressMessages(suppressWarnings(library(stringr)))
+
+#suppressMessages(suppressWarnings(library(alr3)))
+suppressMessages(suppressWarnings(library(car))) #for residualPlots and mmps
+
+suppressMessages(suppressWarnings(library(caret)))
+suppressMessages(suppressWarnings(library(pROC)))
+```
+
+Overview
+
+In this homework assignment, you will explore, analyze and model a data set containing approximately 8000 records representing a customer at an auto insurance company. Each record has two response variables. The first response variable, TARGET_FLAG, is a 1 or a 0. A "1" means that the person was in a car crash. A zero means that the person was not in a car crash. The second response variable is TARGET_AMT. This value is zero
+if the person did not crash their car. But if they did crash their car, this number will be a value greater than zero.
+
+Your objective is to build multiple linear regression and binary logistic regression models on the training data to predict the probability that a person will crash their car and also the amount of money it will cost if the person does crash their car. You can only use the variables given to you (or variables that you derive from the variables
+provided). Below is a short description of the variables of interest in the data set:
+
+
+```{r,echo=F}
+insurance_description <- read.csv('E:/YM_work/CUNY_DAMS/CUNY_621/DATA621_assignment4/data_description.csv')
+
+kable(insurance_description,'html')%>% 
+  kable_styling(bootstrap_options = c('bordered','hover','condensed',full_width=FALSE))
+
+```
+
+
+Deliverables:
+
+??? A write-up submitted in PDF format. Your write-up should have four sections. Each one is described below. You may assume you are addressing me as a fellow data scientist, so do not need to shy away from technical details.
+
+??? Assigned predictions (probabilities, classifications, cost) for the evaluation data set. Use 0.5 threshold.
+
+??? Include your R statistical programming code in an Appendix.
+
+## 1. DATA EXPLORATION  
+
+Describe the size and the variables in the insurance training data set. Consider that too much detail will cause a manager to lose interest while too little detail will make the manager consider that you aren't doing your job. Some suggestions are given below. Please do NOT treat this as a check list of things to do to complete the assignment.
+You should have your own thoughts on what to tell the boss. These are just ideas.
+
+a. Mean / Standard Deviation / Median
+
+b. Bar Chart or Box Plot of the data
+
+c. Is the data correlated to the target variable (or to other variables?)
+
+d. Are any of the variables missing and need to be imputed "fixed"?
+
+```{r}
+insurance_train <- read.csv('https://raw.githubusercontent.com/YunMai-SPS/DATA621_homework/master/data621_assignment4/insurance_training_data.csv')
+
+insurance_test <- read.csv('https://raw.githubusercontent.com/YunMai-SPS/DATA621_homework/master/data621_assignment4/insurance-evaluation-data.csv')
+
+kable(head(insurance_train,10),'html') %>% 
+  kable_styling(bootstrap_options = c('bordered','hover','condensed',full_width=F))
+  
+```
+
+
+```{r}
+summary(insurance_train)
+```
+
+### Convert the money to numeric
+```{r}
+rl_list <- c('INCOME','HOME_VAL','BLUEBOOK','OLDCLAIM')
+
+insurance_train[,which(names(insurance_train)%in%rl_list)] <- lapply(insurance_train[,which(names(insurance_train)%in%rl_list)], function(x) as.character(x))
+
+insurance_train[,which(names(insurance_train)%in%rl_list)] <- lapply(insurance_train[,which(names(insurance_train)%in%rl_list)], function(x) str_replace_all(x,"[[:punct:]$]",""))
+
+insurance_train[,which(names(insurance_train)%in%rl_list)] <- lapply(insurance_train[,which(names(insurance_train)%in%rl_list)], function(x) as.numeric(x))
+
+summary(insurance_train)
+
+```
+
+Descriptive statistics for TARGET_FLAG
+
+```{r}
+table(insurance_train$TARGET_FLAG)
+```
+
+There are about 25% of the case has car crash in the past.
+
+
+### Statistic of the numeric data
+```{r}
+suppressMessages(suppressWarnings(library(pastecs)))
+options(scipen = 100)
+options(digits = 3)
+
+# numeric variables
+num_var <- select_if(insurance_train[-1], is.numeric)
+
+# categorical variables
+cat_var <- insurance_train[,-1]
+cat_var <- cat_var[,-which(names(cat_var)%in% names(num_var))]
+
+kable(stat.desc(num_var),'html') %>% 
+  kable_styling(bootstrap_options = c('bordered','hover','condensed'),full_width = F)
+```
+
+
+### Histagram and boxplot of numeric independent variables:
+
+```{r}
+par(mfrow=c(5,4),oma=c(1,1,0,0), mar=c(2,1,1,0), tcl=-0.01, mgp=c(5,1,0),pin=c(1.4,0.4))
+for(i in 1:15){
+  hist(num_var[,i], probability = T, xlab = '', main = colnames(num_var)[i])
+  d <- density(num_var[,i],na.rm= T)
+  lines(d,col = 'red')
+}
+
+par(mfrow=c(3,4),oma=c(1,1,0,0), mar=c(2,1,1,0), tcl=-0.01, mgp=c(5,1,0),pin=c(1.2,0.9))
+for(i in 2:(length(num_var)-1)){
+  boxplot(num_var[,i]~num_var[,'TARGET_FLAG'],main = colnames(num_var)[i])
+}
+
+```
+
+It is obcious that the variables TARGET_FLAG, KIDSDRIV, HOMEKIDS, TIF, CLM_FREQ and MVR_PTS are not contunuous variables. It is better to treat them as categorical variables.  
+
+```{r}
+levels(as.factor(insurance_train$TARGET_FLAG))
+levels(as.factor(insurance_train$KIDSDRIV))
+levels(as.factor(insurance_train$HOMEKIDS))
+levels(as.factor(insurance_train$TIF))
+levels(as.factor(insurance_train$CLM_FREQ))
+levels(as.factor(insurance_train$MVR_PTS))
+
+insurance_train$TARGET_FLAG <- as.factor(insurance_train$TARGET_FLAG)
+insurance_train$KIDSDRIV <- as.factor(insurance_train$KIDSDRIV)
+insurance_train$HOMEKIDS <- as.factor(insurance_train$HOMEKIDS)
+insurance_train$TIF <- as.factor(insurance_train$TIF)
+insurance_train$CLM_FREQ <- as.factor(insurance_train$CLM_FREQ)
+insurance_train$MVR_PTS <- as.factor(insurance_train$MVR_PTS)
+
+# the numeric variables dataframe changed
+num_var <- select_if(insurance_train[-1], is.numeric)
+
+# categorical variables dataframe changed
+cat_var <- insurance_train[,-1]
+cat_var <- cat_var[,-which(names(cat_var)%in% names(num_var))]
+
+```
+
+
+
+### Categorical independent variables:
+```{r,echo=F,eval=F}
+N    <- 100
+X    <- rnorm(N, 175, 7)
+Y    <- 0.5*X + rnorm(N, 0, 6)
+Yfac <- cut(Y, breaks=c(-Inf, median(Y), Inf), labels=c("lo", "hi"))
+myDf <- data.frame(X, Yfac)
+cdplot(Yfac ~ X, data=myDf)
+
+lims   <- c(160, 170, 180, 190)
+spineplot(X, Yfac, xlab="X", ylab="Yfac", breaks=lims)
+spineplot(X, Yfac, xlab="X", ylab="Yfac")
+
+N      <- 100
+age    <- sample(18:45, N, replace=TRUE)
+drinks <- c("beer", "red wine", "white wine")
+pref   <- factor(sample(drinks, N, replace=TRUE))
+lims   <- c(18, 25, 35, 45)
+ageCls <- cut(age, breaks=lims, labels=LETTERS[1:(length(lims)-1)])
+group  <- factor(sample(letters[1:2], N, replace=TRUE))
+cTab   <- table(ageCls, pref, group)
+mosaicplot(cTab, cex.axis=1)
+```
+
+
+```{r}
+par(mfrow=c(3,5),mar=c(8,2.0,1,3.0))
+for(i in 2:length(cat_var)){
+  #par(mgp=c(axis.title.position, axis.label.position, axis.line.position))
+  par(las=2,mgp=c(8,1,0.5)) #mgp=c(10,1.5,1), mar=c(12,10,1,10),
+  spineplot(cat_var[,i], cat_var$TARGET_FLAG, xlab=names(cat_var)[i], ylab="TARGET_FLAG")
+  title(names(cat_var)[i], adj = 0.5, line = 0.3, cex.main=0.8)
+  #lab<-levels(cat_var[,i])
+  #rotate 45 degrees, srt=60
+  #axis(1, at=length(lab), labels=FALSE)
+  #text(x=lab, y=par()$usr[3]-0.1*(par()$usr[4]-par()$usr[3]),
+  #labels=lab, srt=45, adj=1, xpd=TRUE)
+}
+
+
+#for(i in 2:length(cat_var)){
+#  par(las=2,mar=c(12,10,1,10),mgp=c(10,1.5,1))
+#  cdplot(cat_var$TARGET_FLAG ~ cat_var[,i], data=cat_var ,xlab=names(cat_var)[i], ylab="TARGET_FLAG")
+#}
+
+par(mfrow=c(3,5),mar=c(5,2.0,1,3.0))
+for(i in 2:length(cat_var)){
+  par(las=2,mgp=c(8,1,0.5)) #mgp=c(10,1.5,1), mar=c(12,10,1,10),
+  cdplot(cat_var$TARGET_FLAG ~ cat_var[,i], data=cat_var ,xlab=NULL, ylab="TARGET_FLAG")
+  title(names(cat_var)[i], adj = 0.5, line = 0.3, cex.main=0.9)
+}
+
+```
+
+
+There is trends that KIDSDRIV, Marital Status(MSTATUS), Vehicle Use for commecial or private(CAR_USE), Motor Vehicle Record Points(MVR_PTS), URBANICITY affect the outcome of whether the car was in crash or not. 
+
+### Fill in the empty entries on JOB with a new category
+
+There are blank entries in JOB variable. It is not know whether the job information is not collected or the policy hodler does not have a job. So the blank entries are coded as 'not known' instead of missing data. 
+
+```{r}
+#levels(insurance_train$JOB)
+
+suppressMessages(suppressWarnings(library(stringr)))
+
+#str_detect(insurance_train$JOB,"^$|^ $")
+insurance_train$JOB <- as.factor(str_replace_all(insurance_train$JOB,"^$|^ $","unkown"))
+levels(insurance_train$JOB)
+```
+
+
+### Missing velues
+
+1. First Check the missing data for variables:
+
+```{r}
+missing_age <- 6/nrow(insurance_train)
+missing_yoj <- 454/nrow(insurance_train)
+missing_income <- 445/nrow(insurance_train)
+missing_carage <- 464/nrow(insurance_train)
+missing_homeval <- 510/nrow(insurance_train)
+
+independent_miss <- data.frame('age'=missing_age,'yoj'=missing_yoj,'income'=missing_income,'carage'=missing_carage,'homeval'=missing_homeval)
+
+kable(independent_miss)
+```
+
+There are missing values in AGE(0.07%), YOJ(5.56%), INCOME(5.45%), HOME_VAL(5.69%) and CAR_AGE(6.25%). The percentage of missing data for each of these four viables is either less than 5% or sigltly more than 5%. 
+
+2. Then Check the missing data for cases:
+
+```{r}
+row_miss <- data.frame(apply(insurance_train, 1, function(x) sum(is.na(x))))
+colnames(row_miss) <- 'NAs'
+row_miss$NA_percent <- row_miss$NAs/dim(insurance_train)[2]
+#kable(row_miss[-which(row_miss==0),])
+#kable(row_miss[which(row_miss$NA_percent>0.05),])
+table(row_miss[which(row_miss$NA_percent>0.05),])
+```
+
+There are 139 cases miss 7.69% values, 12 cases miss 11.53% and one case misses 15.38% values. To preserve the information and meaning of the non-missing data, I will do the imputation for the missing values.
+
+
+
+
+
+
+## 2. DATA PREPARATION  
+
+Describe how you have transformed the data by changing the original variables or creating new variables. If you did transform the data or create new variables, discuss why you did this. Here are some possible transformations.
+
+a. Fix missing values (maybe with a Mean or Median value)
+
+b. Create flags to suggest if a variable was missing
+
+c. Transform data by putting it into buckets
+
+d. Mathematical transforms such as log or square root (or use Box-Cox)
+
+e. Combine variables (such as ratios or adding or multiplying) to create new variables
+
+
+Before deciding how to impute the data, we will need to examine the missing data patterns. Impute Using Hmisc Package.
+
+```{r}
+suppressMessages(suppressWarnings(library (rpart)))
+
+suppressMessages(suppressWarnings(library (Hmisc)))
+na.patterns <- naclus(insurance_train)
+
+#who.na <- rpart ( is.na (YOJ) ~ TARGET_FLAG+ TARGET_AMT+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY, data = insurance_train , minbucket =15)
+
+naplot ( na.patterns , 'na per var')
+
+#plot ( who.na , margin = .1 ) 
+#text ( who.na,use.n=TRUE, all=TRUE, cex=.7 ) #too many text
+
+plot ( na.patterns )
+
+
+```
+
+upper panel shows the fraction of observations missing on each predictor. Lower panel
+depicts a hierarchical cluster analysis of missingness combinations. The similarity measure shown on the Y -axis is the fraction of observations for which both variables are missing.
+
+
+```{r}
+suppressMessages(suppressWarnings(library(MissMech)))
+out <- TestMCARNormality(data = insurance_train[,c('AGE', 'YOJ', 'INCOME', 'HOME_VAL', 'CAR_AGE')])
+out
+```
+
+So the missing values has a completely radom pattern.
+
+```{r,eval=F,echo=F}
+suppressMessages(suppressWarnings(library(rms)))
+
+##To know the current storage capacity
+memory.limit()
+
+## To increase the storage capacity
+memory.limit(size=3000000)
+
+m<-lrm(formula = is.na (YOJ) ~ TARGET_FLAG+TARGET_AMT+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY, data = insurance_train)
+
+print(m,needspace='0.3in')
+ 
+#plot ( summary ( is.na (YOJ) ~ TARGET_FLAG+TARGET_AMT+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY, data = insurance_train))
+
+```
+
+Multiple Imputation
+
+The highest fraction of observations with missing values is about 6%, so use 6 imputations.
+
+```{r}
+#suppressMessages(suppressWarnings(library (Hmisc)))
+
+set.seed (1) 
+(mi<-aregImpute (~ TARGET_FLAG+YOJ +TARGET_AMT+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY, data = insurance_train, n.impute = 6, nk = 0, pr= FALSE,tlinear=TRUE, type="normpmm",
+           pmmtype=1, match="weighted",
+           fweighted=0.02,
+           curtail=TRUE, boot.method='approximate bayesian', 
+           burnin=5, x=FALSE))
+
+
+#set.seed (3) 
+#(mi<-aregImpute (~ TARGET_FLAG+YOJ +TARGET_AMT+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY, data = insurance_train[,-1], n.impute = 6, nk = 3, pr= FALSE,tlinear=TRUE, type="regression",           match="weighted",           fweighted=0.02))
+
+```
+
+
+Some levels of some varaibles have too less cases to do bootstrap. Collapse those levels will help to sovle this problem. 
+
+```{r}
+#collapse the levels less than 5 cases
+collapse_train <- insurance_train
+
+table(insurance_train$MVR_PTS)
+#which(table(insurance_train$MVR_PTS)<5)
+collapse_train$MVR_PTS <- as.numeric(as.character(collapse_train$MVR_PTS))
+collapse_train$MVR_PTS[collapse_train$MVR_PTS%in% c(11,13) ] <- 11
+collapse_train$MVR_PTS <- as.factor(collapse_train$MVR_PTS)
+
+table(insurance_train$KIDSDRIV)
+#which(table(insurance_train$KIDSDRIV)<5)
+collapse_train$KIDSDRIV <- as.numeric(as.character(collapse_train$KIDSDRIV))
+collapse_train$KIDSDRIV[collapse_train$KIDSDRIV%in% c(3,4) ] <- 3
+collapse_train$KIDSDRIV <- as.factor(collapse_train$KIDSDRIV)
+
+table(insurance_train$TIF)
+collapse_train$TIF <- as.numeric(as.character(collapse_train$TIF))
+collapse_train$TIF[collapse_train$TIF%in% c(2) ] <- 3
+collapse_train$TIF[collapse_train$TIF%in% c(19,20,21,22,25) ] <- 19
+collapse_train$TIF <- as.factor(collapse_train$TIF)
+
+set.seed (4) 
+(mi<-aregImpute (~ TARGET_FLAG+YOJ +TARGET_AMT+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY, data = collapse_train[,-1], n.impute = 6, nk = 3, pr= FALSE,tlinear=TRUE, type="regression",
+           match="weighted",boot.method='simple',
+           fweighted=0.02))
+
+
+#Ecdf (mi$imputed$AGE)
+#Ecdf (insurance_train$AGE, add=TRUE , col='gray ', lwd =2, subtitles = FALSE )
+
+
+#set.seed (4) 
+#(mi<-aregImpute (~ TARGET_FLAG+YOJ +TARGET_AMT+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY, data = collapse_train, n.impute = 6, nk = 0, pr= FALSE,tlinear=TRUE, type="pmm",pmmtype=1,match="weighted",fweighted=0.02,   curtail=TRUE, boot.method='approximate bayesian',  burnin=5, x=FALSE))
+
+#set.seed (6) 
+#(mi<-aregImpute (~ TARGET_FLAG+YOJ +TARGET_AMT+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY, data = collapse_train[,-1], n.impute = 6, nk = 3, pr= FALSE,tlinear=TRUE, type="regression",           match="closest",boot.method='approximate bayesian'))
+```
+
+```{r}
+# print the first 10 imputed values
+mi$imputed$YOJ[1:10,]
+
+```
+
+Show the distribution of imputed (black) and actual YOJ (gray).
+
+```{r}
+par(mfrow=c(2,3))
+Ecdf (mi$imputed$YOJ)
+Ecdf (insurance_train$YOJ, add=TRUE , col='gray ', lwd =2, subtitles = FALSE )
+
+Ecdf (mi$imputed$AGE)
+Ecdf (insurance_train$AGE, add=TRUE , col='gray ', lwd =2, subtitles = FALSE )
+
+Ecdf (mi$imputed$INCOME[,1])
+Ecdf (insurance_train$INCOME, add=TRUE , col='gray ', lwd =2, subtitles = FALSE )
+
+Ecdf (mi$imputed$HOME_VAL[,1])
+Ecdf (insurance_train$HOME_VAL, add=TRUE , col='gray ', lwd =2, subtitles = FALSE )
+
+Ecdf (mi$imputed$CAR_AGE[,1])
+#Ecdf (insurance_train$CAR_AGE, add=TRUE , col='gray ', lwd =2, subtitles = FALSE )
+Ecdf (insurance_train$CAR_AGE, add=TRUE , col='gray ', lwd =2, subtitles = FALSE )
+
+```
+
+
+### Collinearities
+
+First put the imputed values in the missing cells to get completed data.
+
+```{r}
+fill_data <- function(impute = mi, data = collapse_train, im = 1) {
+  cbind.data.frame(impute.transcan(x = impute, 
+                                   imputation = im, 
+                                   data = data, 
+                                   list.out = TRUE, 
+                                   pr = FALSE))
+}
+
+fill_data_6 <- fill_data(im = 6)#use the last imputation
+
+# the numeric variables dataframe changed
+num_var_1 <- select_if(fill_data_6, is.numeric)
+
+```
+
+
+```{r,eval=F,echo=F}
+# Plot a correlation graph
+suppressMessages(suppressWarnings(library(corrplot)))
+
+# calculate Pearson correlation between predictors.
+traincor <- cor(num_var_1,use = "na.or.complete")
+
+corrplot(traincor, method = "number",number.cex = .57)
+#corr
+```
+
+```{r}
+suppressMessages(suppressWarnings(library(PerformanceAnalytics)))
+
+chart.Correlation(num_var_1, 
+                  method="spearman",
+                  histogram=TRUE,
+                  pch=16)
+
+```
+
+**VIF test**
+```{r}
+# copy these files in the working directory and source the code for vif function
+source(file = "HighstatLibV6.R")
+
+corvif_noCorr <- function(dataz) {
+    dataz <- as.data.frame(dataz)
+    # correlation part cat('Correlations of the variables\n\n') tmp_cor <-
+    # cor(dataz,use='complete.obs') print(tmp_cor)
+
+    # vif part
+    form <- formula(paste("fooy ~ ", paste(strsplit(names(dataz), " "), collapse = " + ")))
+    dataz <- data.frame(fooy = 1, dataz)
+    lm_mod <- lm(form, dataz)
+
+    cat("\n\nVariance inflation factors\n\n")
+    print(myvif(lm_mod))
+}
+
+thinXwithVIF = function(X, Threshold = 3) {
+    VIFS = corvif(X)
+    XVars = names(X)
+    max(VIFS$GVIF)
+    while (max(VIFS$GVIF) >= Threshold) {
+        print(paste("Drop ", XVars[which.max(VIFS$GVIF)], ".", sep = ""), quote = FALSE)
+        XVars = XVars[-which.max(VIFS$GVIF)]
+        X = X[, -which.max(VIFS$GVIF)]
+        VIFS = corvif_noCorr(X)
+        print(max(VIFS$GVIF))
+    }
+    return(list(VIFS = VIFS, XVars = XVars, X = X))
+}
+
+
+Threshold <- 4
+thinXwithVIF(num_var_1, Threshold)
+```
+
+VIFs are less than the threashold and do not indicate we should take off any numeric variables because of the multicollinearities.
+
+
+##3. BUILD MODELS  
+
+Using the training data set, build at least two different multiple linear regression models and three different binary logistic regression models, using different variables (or the same variables with different transformations). You may select the variables manually, use an approach such as Forward or Stepwise, use a different approach such
+as trees, or use a combination of techniques. Describe the techniques you used. If you manually selected a variable for inclusion into the model or exclusion into the model, indicate why this was done.
+
+Discuss the coefficients in the models, do they make sense? For example, if a person has a lot of traffic tickets, you would reasonably expect that person to have more car crashes. If the coefficient is negative (suggesting that the person is a safer driver), then that needs to be discussed. Are you keeping the model even though it is counter
+intuitive? Why? The boss needs to know.
+
+### 3.1 Logistic regression model - AIC-based automated enumeration approach
+
+**Build the model**
+```{r}
+suppressMessages(suppressWarnings((library(rms))))
+#(c<-fit.mult.impute(TARGET_AMT ~ YOJ+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY,fitter=lrm,xtrans=mi,data=collapse_train[,-1]))
+
+(logit_1 <- fit.mult.impute(TARGET_FLAG ~ TARGET_AMT+YOJ+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY,fitter=glm, xtrans=mi,  family = binomial(link='logit'), data = collapse_train[,-1]))
+```
+
+**Evaluation of the model**
+```{r}
+suppressMessages(suppressWarnings(library(MASS)))
+# goodness of fit: pseudo R squared
+(pR2_1 <- 1 - logit_1$deviance / logit_1$null.deviance)
+
+#or
+#(pR2 <- 1- logLik(logitfit.1)/logLik(logit.null))
+ 
+# AIC
+AIC_1 <- extractAIC(logit_1 )[2]
+
+# confusion matrix
+clsdf_1 <- data.frame(fill_data_6$TARGET_FLAG)
+clsdf_1$pre.prob <- predict( logit_1, newdata = fill_data_6, type = "response")
+clsdf_1$pre.target <- ifelse(clsdf_1$pre.prob>0.5, 1,0)
+clsdf_1$pre.target <- as.factor(clsdf_1$pre.target)
+names(clsdf_1)[names(clsdf_1)=='fill_data_6.TARGET_FLAG'] <- 'TARGET_FLAG'
+
+#X.test <- trsf_df[,-which(names(trsf_df)=='target')]
+#X.test <- X.test[,which(names(X.test) %in% c('medv', 'q.medv', 'zn', 'l.zn', 'dis', 'chas', 'lstat', 'age'))]
+#y_predicted <- predict(logitfit.1, newx = as.matrix(X.test))
+
+suppressMessages(suppressWarnings(library(caret)))
+cfmx_1 <- confusionMatrix(data = clsdf_1$pre.target, reference = clsdf_1$TARGET_FLAG, positive = "1")
+
+(cfmx_1$table)
+(acrcy_1 <- cfmx_1$overall['Accuracy'])
+(err_rate_1 <- 1-cfmx_1$overall['Accuracy'])
+(preci_1 <- cfmx_1$byClass['Precision'])
+(sensi_1 <- cfmx_1$byClass['Sensitivity'])
+(speci_1 <- cfmx_1$byClass['Specificity'])
+(F1_1 <- cfmx_1$byClass['F1'])
+
+# ROC and AUC
+suppressMessages(suppressWarnings(library(ROCR)))
+rocCurve_1 <- roc(response = clsdf_1$TARGET_FLAG,
+ predictor = clsdf_1$pre.prob,
+ levels = levels(as.factor(clsdf_1$TARGET_FLAG)))
+
+plot(rocCurve_1, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_1 <- pROC::auc(rocCurve_1),'\n\n')
+
+#ci_1 <- ci(rocCurve_1)
+```
+
+### 3.2 Logistic regression model - Automated likelihood-ratio-test-based backward selection
+
+**Build the model**
+```{r}
+#Create a full and null logistic models
+logit.full <- glm(paste('TARGET_FLAG ~',paste(names(fill_data_6[,-1]),collapse = "+")), fill_data_6, family=binomial(link = 'logit'))
+logit.null <- glm(TARGET_FLAG ~ 1, fill_data_6, family=binomial(link = 'logit'))
+
+#center the data before fit the full lrm model
+num_var_cen <- data.frame(scale(num_var_1))
+fill_data_6_cen <- fill_data_6[,-which(names(fill_data_6) %in% names(num_var_cen))] 
+fill_data_6_cen <- cbind(fill_data_6_cen,num_var_cen)
+  
+lrm.full <- lrm(TARGET_FLAG ~ YOJ+TARGET_AMT+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY,data=fill_data_6_cen,maxit=50)
+
+fastbw(lrm.full, rule = "p", sls = 0.1)
+logit_2 <- glm(paste('TARGET_FLAG ~',paste(names(fill_data_6[,-1]),collapse = "+")),data=fill_data_6, family=binomial(link = 'logit'))
+summary(logit_2)
+
+residualPlots(logit_2, layout = c(3, 4),ask=F) 
+
+mmps(logit_2,ask=F)
+
+```
+
+From the results of the lack-of-fit test we can see that there is no relationship between  residuals with each numerical predictor variable. There is no need to add any log or quadratic transformation. 
+
+The goodness-of-fit test by the marginal model plots shows the agreement between the model and the data. 
+
+**Evaluation of the model**
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_2 <- 1 - logit_2$deviance / logit_2$null.deviance)
+
+#or
+#(pR2 <- 1- logLik(logitfit.1)/logLik(logit.null))
+ 
+# AIC
+AIC_2 <- extractAIC(logit_2 )[2]
+
+# confusion matrix
+clsdf_2 <- data.frame(fill_data_6$TARGET_FLAG)
+clsdf_2$pre.prob <- predict( logit_2, newdata = fill_data_6, type = "response")
+clsdf_2$pre.target <- ifelse(clsdf_2$pre.prob>0.5, 1,0)
+clsdf_2$pre.target <- as.factor(clsdf_2$pre.target)
+names(clsdf_2)[names(clsdf_2)=='fill_data_6.TARGET_FLAG'] <- 'TARGET_FLAG'
+
+#X.test <- trsf_df[,-which(names(trsf_df)=='target')]
+#X.test <- X.test[,which(names(X.test) %in% c('medv', 'q.medv', 'zn', 'l.zn', 'dis', 'chas', 'lstat', 'age'))]
+#y_predicted <- predict(logitfit.1, newx = as.matrix(X.test))
+
+cfmx_2 <- confusionMatrix(data = clsdf_2$pre.target, reference = clsdf_2$TARGET_FLAG, positive = "1")
+
+(cfmx_2$table)
+(acrcy_2 <- cfmx_2$overall['Accuracy'])
+(err_rate_2 <- 1-cfmx_2$overall['Accuracy'])
+(preci_2 <- cfmx_2$byClass['Precision'])
+(sensi_2 <- cfmx_2$byClass['Sensitivity'])
+(speci_2 <- cfmx_2$byClass['Specificity'])
+(F1_2 <- cfmx_2$byClass['F1'])
+
+# ROC and AUC
+rocCurve_2 <- roc(response = clsdf_2$TARGET_FLAG,
+ predictor = clsdf_2$pre.prob,
+ levels = levels(as.factor(clsdf_2$TARGET_FLAG)))
+
+plot(rocCurve_2, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_2 <- pROC::auc(rocCurve_2),'\n\n')
+
+#ci_2 <- ci(rocCurve_2)
+```
+
+
+In this model, the variable TARGET_AMT is the only one predictor variable. From the results of the lack-of-fit test we can see that there is no relationship between the Pearson residuals with the predictor variable. There is no need to add any log or quadratic transformation. 
+
+The goodness-of-fit test by the marginal model plot shows the agreement between the model and the data. 
+
+### 3.3 Logistic regression model - Multinomial logistic regression model
+
+**Build the model**
+
+Since binomial logistic regression model is a special form of multinomial logistic regression model, I will use mlogit function to build the binomial logistic regression model.
+
+```{r}
+suppressMessages(suppressWarnings(library(mlogit)))
+
+fill_data_bi <- fill_data_6
+fill_data_bi$TARGET_FLAG <- as.factor(ifelse(fill_data_6$TARGET_FLAG==1,'Yes','No'))
+
+# Reshaping the data from wide to long format
+#mydata$mode<-as.factor(mydata$mode)
+mldata<-mlogit.data(fill_data_6, varying=NULL, choice="TARGET_FLAG", shape="wide")
+mldata[1:20,]
+
+# Multinomial logit model coefficients 
+logit_3 <- mlogit(TARGET_FLAG ~ 1 | YOJ+TARGET_AMT+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY,data=mldata, reflevel=levels(fill_data_6$TARGET_FLAG)[1])
+summary(logit_3)
+
+```
+
+TARGET_AMT  CLM_FREQ4 URBANICITYz_Highly Rural/ Rural KIDSDRIV3 HOMEKIDS4 BLUEBOOK  CLM_FREQ2
+
+
+
+```{r,eval=F,echo=F}
+residualPlots(logit_3, layout = c(3, 4),ask=F) 
+
+mmps(logit_3,ask=F)
+```
+
+```{r,echo=F,eval=F}
+
+# Multinomial logit model odds ratios 
+exp(coef(mlogit.model1))
+
+mldata<-mlogit.data(fill_data_bi, varying=NULL, choice="TARGET_FLAG", shape="wide")
+# Setting mean values for variables to use for marginal effects 
+m <- mlogit(TARGET_FLAG ~ 1 | CLM_FREQ+KIDSDRIV+HOMEKIDS+TARGET_AMT+URBANICITY+BLUEBOOK,data=mldata, reflevel=levels(fill_data_bi$TARGET_FLAG)[1])
+z <- with(mldata, data.frame(TARGET_AMT = tapply(TARGET_AMT, index(m)$alt, mean),                             CLM_FREQ = tapply(as.numeric(as.character(CLM_FREQ)), index(m)$alt, mean), KIDSDRIV = tapply(as.numeric(as.character(KIDSDRIV)), index(m)$alt, mean),HOMEKIDS = tapply(as.numeric(as.character(HOMEKIDS)), index(m)$alt, mean), URBANICITY=0.3, BLUEBOOK=mean(BLUEBOOK)))
+
+a<-aggregate(.~TARGET_FLAG, data=fill_data_6, mean)
+z<-a[,names(a) %in% c('TARGET_FLAG','TARGET_AMT','CLM_FREQ','URBANICITY','KIDSDRIV','HOMEKIDS','BLUEBOOK')]
+
+#covariate = c('TARGET_AMT','CLM_FREQ','URBANICITY'),
+# Multinomial logit model marginal effects
+effects(mlogit.model1,  data = z)
+```
+
+**Evaluation of the model**
+```{r,echo=F,eval=F}
+# goodness of fit: pseudo R squared
+#(pR2_3 <- 1 - logit_3$deviance / logit_3$null.deviance)
+
+#or
+(pR2_3 <- 1- logLik(logit_3)/logLik(logit_3))
+ 
+# AIC
+#AIC_3 <- extractAIC(logit_3 )[2]
+
+# confusion matrix
+clsdf_3 <- data.frame(fill_data_6$TARGET_FLAG)
+clsdf_3$pre.prob <- predict( logit_3, newdata = fill_data_6, type = "response")
+clsdf_2$pre.target <- ifelse(clsdf_2$pre.prob>0.5, 1,0)
+clsdf_2$pre.target <- as.factor(clsdf_2$pre.target)
+names(clsdf_2)[names(clsdf_2)=='fill_data_6.TARGET_FLAG'] <- 'TARGET_FLAG'
+
+#X.test <- trsf_df[,-which(names(trsf_df)=='target')]
+#X.test <- X.test[,which(names(X.test) %in% c('medv', 'q.medv', 'zn', 'l.zn', 'dis', 'chas', 'lstat', 'age'))]
+#y_predicted <- predict(logitfit.1, newx = as.matrix(X.test))
+
+cfmx_2 <- confusionMatrix(data = clsdf_2$pre.target, reference = clsdf_2$TARGET_FLAG, positive = "1")
+
+(cfmx_2$table)
+(acrcy_2 <- cfmx_2$overall['Accuracy'])
+(err_rate_2 <- 1-cfmx_2$overall['Accuracy'])
+(preci_2 <- cfmx_2$byClass['Precision'])
+(sensi_2 <- cfmx_2$byClass['Sensitivity'])
+(speci_2 <- cfmx_2$byClass['Specificity'])
+(F1_2 <- cfmx_2$byClass['F1'])
+
+# ROC and AUC
+rocCurve_2 <- roc(response = clsdf_2$TARGET_FLAG,
+ predictor = clsdf_2$pre.prob,
+ levels = levels(as.factor(clsdf_2$TARGET_FLAG)))
+
+plot(rocCurve_2, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_2 <- pROC::auc(rocCurve_2),'\n\n')
+
+#ci_3 <- ci(rocCurve_3)
+```
+
+### 3.4 Linear regression model - backward selection
+
+**Build the model**
+```{r}
+# OLS regression cofficients
+olsreg <- lm(paste('TARGET_AMT ~',paste(names(fill_data_6[,-3]),collapse = "+")),fill_data_6)
+
+olsfit_1 <- step(olsreg,direction="backward",trace=FALSE)
+#coef(olsfit_1)
+summary(olsfit_1)
+
+#diagnostic plots for linear regression
+par(mfrow=c(2,2))
+plot(olsfit_1)
+
+null <- lm(TARGET_AMT ~ 1, data=fill_data_6)
+
+```
+
+**Evaluation of the model**
+```{r,echo=F,eval=F}
+# goodness of fit: pseudo R squared
+#(pR2_4 <- 1 - olsfit_1$deviance / olsfit_1$null.deviance)
+
+#or
+(pR2_4 <- 1- logLik(olsfit_1)/logLik(null))
+ 
+# AIC
+AIC_4 <- extractAIC(olsfit_1)[2]
+
+# confusion matrix
+clsdf_4 <- data.frame(fill_data_6$TARGET_FLAG)
+clsdf_4$pre.prob <- predict( olsfit_1, newdata = fill_data_6, type = "response")
+clsdf_4$pre.target <- ifelse(clsdf_4$pre.prob>0.5, 1,0)
+clsdf_4$pre.target <- as.factor(clsdf_4$pre.target)
+names(clsdf_4)[names(clsdf_4)=='fill_data_6.TARGET_FLAG'] <- 'TARGET_FLAG'
+
+#X.test <- trsf_df[,-which(names(trsf_df)=='target')]
+#X.test <- X.test[,which(names(X.test) %in% c('medv', 'q.medv', 'zn', 'l.zn', 'dis', 'chas', 'lstat', 'age'))]
+#y_predicted <- predict(logitfit.1, newx = as.matrix(X.test))
+
+cfmx_4 <- confusionMatrix(data = clsdf_4$pre.target, reference = clsdf_4$TARGET_FLAG, positive = "1")
+
+(cfmx_4$table)
+(acrcy_4 <- cfmx_4$overall['Accuracy'])
+(err_rate_4 <- 1-cfmx_4$overall['Accuracy'])
+(preci_4 <- cfmx_4$byClass['Precision'])
+(sensi_4 <- cfmx_4$byClass['Sensitivity'])
+(speci_4 <- cfmx_4$byClass['Specificity'])
+(F1_4 <- cfmx_4$byClass['F1'])
+
+# ROC and AUC
+rocCurve_4 <- roc(response = clsdf_4$TARGET_FLAG,
+ predictor = clsdf_4$pre.prob,
+ levels = levels(as.factor(clsdf_4$TARGET_FLAG)))
+
+plot(rocCurve_4, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_4 <- pROC::auc(rocCurve_4),'\n\n')
+
+#ci_4 <- ci(rocCurve_4)
+```
+
+### 3.5 Linear regression model - fit.mult.impute function 
+
+**Build the model**
+```{r}
+(olsfit_2 <- fit.mult.impute(TARGET_AMT ~ YOJ+KIDSDRIV+AGE+HOMEKIDS+INCOME+PARENT1+HOME_VAL+MSTATUS+SEX+EDUCATION+JOB+TRAVTIME+CAR_USE+BLUEBOOK+TIF+CAR_TYPE+RED_CAR+OLDCLAIM+CLM_FREQ+REVOKED+MVR_PTS+CAR_AGE+URBANICITY,fitter=ols,xtrans=mi,data=collapse_train[,-1]))
+
+
+```
+
+**Evaluation of the model**
+```{r,echo=F,eval=F}
+# goodness of fit: pseudo R squared
+#(pR2_4 <- 1 - olsfit_1$deviance / olsfit_1$null.deviance)
+
+#or
+(pR2_5 <- 1- logLik(olsfit_2)/logLik(null))
+ 
+# AIC
+#AIC_5 <- extractAIC(olsfit_2)[2]
+
+# confusion matrix
+clsdf_5 <- data.frame(fill_data_6$TARGET_FLAG)
+clsdf_5$pre.prob <- predict( olsfit_2, newdata = fill_data_6, type = "response")
+clsdf_5$pre.target <- ifelse(clsdf_5$pre.prob>0.5, 1,0)
+clsdf_5$pre.target <- as.factor(clsdf_5$pre.target)
+names(clsdf_5)[names(clsdf_5)=='fill_data_6.TARGET_FLAG'] <- 'TARGET_FLAG'
+
+#X.test <- trsf_df[,-which(names(trsf_df)=='target')]
+#X.test <- X.test[,which(names(X.test) %in% c('medv', 'q.medv', 'zn', 'l.zn', 'dis', 'chas', 'lstat', 'age'))]
+#y_predicted <- predict(logitfit.1, newx = as.matrix(X.test))
+
+cfmx_5 <- confusionMatrix(data = clsdf_5$pre.target, reference = clsdf_5$TARGET_FLAG, positive = "1")
+
+(cfmx_5$table)
+(acrcy_5 <- cfmx_5$overall['Accuracy'])
+(err_rate_5 <- 1-cfmx_5$overall['Accuracy'])
+(preci_5 <- cfmx_5$byClass['Precision'])
+(sensi_5 <- cfmx_5$byClass['Sensitivity'])
+(speci_5 <- cfmx_5$byClass['Specificity'])
+(F1_5 <- cfmx_5$byClass['F1'])
+
+# ROC and AUC
+rocCurve_5 <- roc(response = clsdf_5$TARGET_FLAG,
+ predictor = clsdf_5$pre.prob,
+ levels = levels(as.factor(clsdf_5$TARGET_FLAG)))
+
+plot(rocCurve_5, legacy.axes = TRUE)
+
+cat('AUC is', auc_pROC_5 <- pROC::auc(rocCurve_5),'\n\n')
+
+#ci_4 <- ci(rocCurve_4)
+```
+
+
+
+
+
+##4. SELECT MODELS  
+
+Decide on the criteria for selecting the best multiple linear regression model and the best binary logistic regression model. Will you select models with slightly worse performance if it makes more sense or is more parsimonious? Discuss why you selected your models.
+
+For the multiple linear regression model, will you use a metric such as Adjusted R2, RMSE, etc.? Be sure to explain how you can make inferences from the model, discuss multi-collinearity issues (if any), and discuss other relevant model output. Using the training data set, evaluate the multiple linear regression model based on (a)
+mean squared error, (b) R2, (c) F-statistic, and (d) residual plots. For the binary logistic regression model, will you use a metric such as log likelihood, AIC, ROC curve, etc.? Using the training data set, evaluate the binary logistic
+regression model based on (a) accuracy, (b) classification error rate, (c) precision, (d) sensitivity, (e) specificity, (f)F1 score, (g) AUC, and (h) confusion matrix. Make predictions using the evaluation data set.
+
+```{r,eval=F}
+logLik(logit_1)
+logLik(logit_2)
+logLik(logit_3)
+logLik(olsfit_1)
+logLik(olsfit_2)
+
+pR2_1
+pR2_2
+pR2_3
+pR2_4
+pR2_5
+
+AIC_1
+
+AIC_2
+```
+
+Base on the log likelihood, model 1 and 2 have the same highest values. model 1 and 2 also have the same highest R squared values and same AIC. So model 1 and 2 are the best. 
+
+Make predictions using the evaluation data set
+
+```{r,echo=F,eval=F}
+trsf_test <- insurance_test
+trsf_test[,'pollution'] <- trsf_test$nox*1000 - trsf_test$tax
+trsf_test$l.zn <- log(trsf_test[,'zn']+1)
+
+trsf_test$q.indus  <- (trsf_test[,'indus'])^2
+trsf_test$q.rm <- (trsf_test[,'rm'])^2
+trsf_test$q.age  <- (trsf_test[,'age'])^2
+trsf_test$q.ptratio  <- (trsf_test[,'ptratio'])^2
+trsf_test$q.medv  <- (trsf_test[,'medv'])^2
+trsf_test$q.pollution  <- (trsf_test[,'pollution'])^2
+
+  
+trsf_test <- trsf_test[,which(names(trsf_test)%in%c('indus','rm','rad','ptratio','pollution','q.indus','q.rm','q.ptratio','q.pollution'))]  
+
+test_pre <- crime_test
+
+test_pre$pred.prob <- predict(logitfit.2, newdata = trsf_test ,type = "response")
+test_pre$pred.target <- ifelse(test_pre$pred.prob>0.5,1,0)
+
+kable(head(test_pre,10), "html") %>%
+  kable_styling(bootstrap_options = c("bordered", "hover", "condensed"),full_width = F)
+
+#write.csv(test_pre,'crime_test_predition.csv')
+
+```
