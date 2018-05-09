@@ -1,0 +1,2441 @@
+---
+title: "DATA621_Assginment_5"
+author: "Yun Mai, Gurpreet Singh, Chirag Vithalani"
+date: "May 1, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressMessages(suppressWarnings(library(knitr)))
+
+suppressMessages(suppressWarnings(library(ggplot2)))
+suppressMessages(suppressWarnings(library(kableExtra)))
+suppressMessages(suppressWarnings(library(formattable)))
+suppressMessages(suppressWarnings(library(dplyr)))
+suppressMessages(suppressWarnings(library(stringr)))
+
+#suppressMessages(suppressWarnings(library(alr3)))
+suppressMessages(suppressWarnings(library(car))) #for residualPlots and mmps
+
+suppressMessages(suppressWarnings(library(caret)))
+suppressMessages(suppressWarnings(library(pROC)))
+
+suppressMessages(suppressWarnings(library(rms))) # rms ols lrm
+
+
+suppressMessages(suppressWarnings(library(AER)))
+suppressMessages(suppressWarnings(library(pscl)))
+suppressMessages(suppressWarnings(library(DHARMa)))
+suppressMessages(suppressWarnings(library(faraway)))
+
+suppressMessages(suppressWarnings(library(MASS)))
+suppressMessages(suppressWarnings(library(broom)))
+
+```
+
+```{r warning=FALSE, echo=T, message=FALSE}
+DO_PERFORM_STEPS <- TRUE
+
+suppressMessages(suppressWarnings(library(plotly)))
+suppressMessages(suppressWarnings(library(stringr)))
+suppressMessages(suppressWarnings(library(sandwich)))
+suppressMessages(suppressWarnings(library(MASS)))
+suppressMessages(suppressWarnings(library(ROCR)))
+suppressMessages(suppressWarnings(library(pscl)))
+suppressMessages(suppressWarnings(library(boot)))
+suppressMessages(suppressWarnings(library(gridExtra)))
+suppressMessages(suppressWarnings(library(Amelia)))
+suppressMessages(suppressWarnings(library(plyr)))
+suppressMessages(suppressWarnings(library(psych)))
+
+suppressMessages(suppressWarnings(library(kableExtra)))
+```
+
+
+
+```{r}
+wine_description <- read.csv("https://raw.githubusercontent.com/YunMai-SPS/DATA621_homework/master/data621_assignment5/wine_data_description.csv")
+
+kable(wine_description,'html')%>% 
+  kable_styling(bootstrap_options = c('bordered',full_width = T),font_size = 21) %>%
+  column_spec(1, width = "3em",color='black') %>% 
+  column_spec(2, width = "30em",color='black') %>% 
+  column_spec(3, width = "30em",color='black')
+```
+
+
+##1. DATA EXPLORATION (25 Points)
+
+**Specification:**
+
+Describe the size and the variables in the wine training data set. Consider that too much detail will cause a manager to lose interest while too little detail will make the manager consider that you aren't doing your job. Some suggestions are given below. Please do NOT treat this as a check list of things to do to complete the assignment. You should have your own thoughts on what to tell the boss. These are just ideas.
+a. Mean / Standard Deviation / Median
+b. Bar Chart or Box Plot of the data
+c. Is the data correlated to the target variable (or to other variables?)
+d. Are any of the variables missing and need to be imputed "fixed"?
+
+
+```{r}
+wine_train <- read.csv('https://raw.githubusercontent.com/YunMai-SPS/DATA621_homework/master/data621_assignment5/wine-training-data.csv')
+colnames(wine_train)[1] <- 'INDEX'
+
+wine_test <- read.csv('https://raw.githubusercontent.com/YunMai-SPS/DATA621_homework/master/data621_assignment5/wine-evaluation-data.csv')
+
+kable(head(wine_train,10),'html') %>% 
+  kable_styling(bootstrap_options = c('bordered','hover','condensed',full_width=F))
+
+```
+
+```{r}
+wine_training_data <- read.csv('https://raw.githubusercontent.com/chirag-vithlani/Business_Analytics_and_Data_Mining_DATA_621/master/Homework5/data/wine-training-data.csv', stringsAsFactors = FALSE)
+intro <- read.csv('https://raw.githubusercontent.com/chirag-vithlani/Business_Analytics_and_Data_Mining_DATA_621/master/Homework5/data/wine_data_intro.csv', stringsAsFactors = FALSE)
+names(intro)[2]<-"Description"
+kable(intro, "html") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+
+do_factors <- function(wine_object)
+{
+  wine_object <- within(wine_object, {
+      LabelAppeal <- factor(LabelAppeal)
+      AcidIndex <- factor(AcidIndex)
+      STARS <- factor(STARS)
+  })
+  return (wine_object)
+}
+colnames(wine_training_data)[1]<-"INDEX"
+```
+
+
+Objective here is to do analysis of chemical properties of wine data to maximize sales.
+So here independent varialbes are chemical properties of wines and its star rating. Dependent variable is number of sample cases. 
+More samples are there, more that wine sold.
+
+There are `r nrow(wine_training_data)` number of rows.
+
+```{r}
+summary(wine_train)
+```
+
+Things we can note from summary.
+
+- As we can see many variables have missing values ( shown through NA's ). Mainly star rating missing for 3359 values.
+- For many variables value ranges from negative to positive.
+- We can remove index variable from analysis.
+
+### 1.1 Descriptive statistics for TARGET 
+
+```{r}
+table(wine_train$TARGET)
+```
+
+
+### 1.2 Plot the numerical data and the categorical data separately
+
+**Statistic of the numerical data**
+```{r}
+suppressMessages(suppressWarnings(library(pastecs)))
+options(scipen = 100)
+options(digits = 3)
+
+# numeric variables
+num_var <- wine_train[-which(names(wine_train) %in% c('INDEX','TARGET','LabelAppeal','AcidIndex','STARS'))]
+
+# categorical variables
+cat_var <- wine_train[,-1]
+cat_var <- cat_var[,-which(names(cat_var)%in% names(num_var))]
+```
+
+
+** Histagram and boxplot of numeric independent variables:**
+  
+```{r}
+par(mfrow=c(4,4),oma=c(1,1,0,0), mar=c(2,1,1,0)+.1, tcl=-0.01, mgp=c(5,1,0),pin=c(1.4,0.4))
+for(i in 1:length(num_var)){
+  hist(num_var[,i], probability = T, xlab = '', main = colnames(num_var)[i])
+  d <- density(num_var[,i],na.rm= T)
+  lines(d,col = 'red')
+}
+
+```
+
+```{r}
+par(mfrow=c(1,4),oma=c(1,1,0,0), mar=c(2,1,1,0)+.1, tcl=-0.01, mgp=c(5,1,0),pin=c(1.4,0.4))
+for(i in 1:length(cat_var)){
+  hist(cat_var[,i],xlab = '', main = colnames(cat_var)[i])
+}
+
+```
+
+
+```{r}
+par(mfrow=c(3,5),oma=c(1,1,1,1), mar=c(1, 3, 1.5, 2)+.1, tcl=-0.01, mgp=c(5,1,0))
+for(i in 2:length(wine_train)){
+  boxplot(wine_train[,i],main = colnames(wine_train)[i])
+}
+
+```
+
+
+A basic analysis:
+
+* Our histograms show normally distributed variables
+* Our Box-Plots seem to have large amounts of instances outside of the the upper and lower whiskers.  We will examine this further. 
+* The dependent variable is "TARGET", which is the number of cases purchased
+
+** Categorical independent variables:**
+
+```{r}
+cat_var <- as.data.frame(lapply(cat_var,as.factor))
+
+# conditional densities plots
+par(mfrow=c(1,3),mar=c(5,2.0,1,3.0))
+for(i in 2:length(cat_var)){
+  par(las=2,mgp=c(8,1,0.5)) #mgp=c(10,1.5,1), mar=c(12,10,1,10),
+  cdplot(cat_var$TARGET ~ cat_var[,i], data=cat_var ,xlab=NULL, ylab="TARGET")
+  title(names(cat_var)[i], adj = 0.5, line = 0.3, cex.main=0.9)
+}
+
+```
+
+
+### 1.3 Missing values
+
+**1.3.1. The missing data for variables:**
+
+```{r}
+pMiss <- function(x){sum(is.na(x))/length(x)*100}
+miss_feature <- as.data.frame(apply(wine_train[,-1],2,pMiss))
+miss_feature_df <- miss_feature
+miss_feature_df$predictors <- as.numeric(t(stat.desc(wine_train[,-1])[3,]))
+miss_feature_df$missing_values <- rownames(miss_feature)
+miss_feature_df <- miss_feature_df[,3:1]
+colnames(miss_feature_df)<- c('variable_name','missing_values', 'missing_values(%)')
+
+#kable(miss_feature_df)
+kable(filter(miss_feature_df, miss_feature_df[,'missing_values(%)']!=0 ), "html") %>%
+  kable_styling(bootstrap_options = c("striped", "bordered", "hover", "condensed"),full_width = F)
+
+#cat("The variables missed more than 5% datapoints are:",paste(rownames(miss_feature)[which(miss_feature > 5)],collapse = ',')) cat("\n")
+
+(filter(miss_feature_df, miss_feature_df[,'missing_values(%)']!=0 )[,1])
+```
+
+The variables missed more than 5% datapoints are: FreeSulfurDioxide,TotalSulfurDioxide,Sulphates,Alcohol,STARS
+
+STAR is a concern because 26% 0f the values are missing. The the missing data will be Imputated.
+
+**1.3.2. The missing data for cases:**
+
+```{r}
+row_miss <- data.frame(apply(wine_train, 1, function(x) sum(is.na(x))))
+colnames(row_miss) <- 'NAs'
+row_miss$NA_percent <- row_miss$NAs/dim(wine_train)[2]
+#kable(row_miss[-which(row_miss==0),])
+#kable(row_miss[which(row_miss$NA_percent>0.05),])
+table(row_miss[which(row_miss$NA_percent>0.05),])
+```
+
+There are 4780 cases miss 6.25% values, 1342 cases miss 12.5%, 212 cases misses 18.75% values and 25 cases misses 25% values. 
+
+To preserve the information and meaning of the non-missing data, I will do the imputation for the missing values.
+
+**1.3.3. Explore NA's through Missingness Map** 
+
+The below table shows a summary of the NA values in the data.  Only STARS had an NA frequency higher than 10%, so this was a concern.  All NA values were thus replaced with samples from their respective collections, except for STARS, which required further analysis.
+
+```{r warning=FALSE, echo=T, message=FALSE}
+
+not_na_count <- sapply(wine_training_data, function(y) sum(length(which(!is.na(y)))))
+na_count <- sapply(wine_training_data, function(y) sum(length(which(is.na(y)))))
+na_pct <- na_count / (na_count + not_na_count)
+
+na_summary_df <- data.frame(not_na_count,na_count,na_pct)
+#Missingness Map
+missmap(wine_training_data, main = "Missing Values Before Replacement" ,col=c("gray90", "black"),legend = F)
+
+kable(na_summary_df)
+
+
+wine_training_data$ResidualSugar[is.na(wine_training_data$ResidualSugar)] <- sample(wine_training_data$ResidualSugar[!is.na(wine_training_data$ResidualSugar)])
+wine_training_data$Chlorides[is.na(wine_training_data$Chlorides)] <- sample(wine_training_data$Chlorides[!is.na(wine_training_data$Chlorides)])
+wine_training_data$FreeSulfurDioxide[is.na(wine_training_data$FreeSulfurDioxide)] <- sample(wine_training_data$FreeSulfurDioxide[!is.na(wine_training_data$FreeSulfurDioxide)])
+wine_training_data$TotalSulfurDioxide[is.na(wine_training_data$TotalSulfurDioxide)] <- sample(wine_training_data$TotalSulfurDioxide[!is.na(wine_training_data$TotalSulfurDioxide)])
+wine_training_data$pH[is.na(wine_training_data$pH)] <- sample(wine_training_data$pH[!is.na(wine_training_data$pH)])
+wine_training_data$Sulphates[is.na(wine_training_data$Sulphates)] <- sample(wine_training_data$Sulphates[!is.na(wine_training_data$Sulphates)])
+wine_training_data$Alcohol[is.na(wine_training_data$Alcohol)] <- sample(wine_training_data$Alcohol[!is.na(wine_training_data$Alcohol)])
+#Missingness Map
+missmap(wine_training_data, main = "Missing Values After Replacement (Except STARS variable) " ,col=c("gray90", "black"),legend = F)
+
+```
+
+
+
+##2. DATA PREPARATION  
+
+**Specification:**
+
+Describe how you have transformed the data by changing the original variables or creating new variables. If you did transform the data or create new variables, discuss why you did this. Here are some possible transformations.
+
+a. Fix missing values (maybe with a Mean or Median value)
+
+b. Create flags to suggest if a variable was missing
+
+c. Transform data by putting it into buckets
+
+d. Mathematical transforms such as log or square root (or use Box-Cox)
+
+e. Combine variables (such as ratios or adding or multiplying) to create new variables
+
+### 2.1 Imputation
+
+#### 2.1.1 Missingness pattern test
+                                                                               
+Before deciding how to impute the data, we will need to examine the missing data patterns.  A visualization of the missing values in variables shown as follows:
+                                                                                 
+```{r}
+suppressMessages(suppressWarnings(library (rpart)))
+                                                                             suppressMessages(suppressWarnings(library (Hmisc)))
+na.patterns <- naclus(wine_train)
+
+naplot ( na.patterns , 'na per var')
+
+#plot ( who.na , margin = .1 ) 
+#text ( who.na,use.n=TRUE, all=TRUE, cex=.7 ) #too many text
+                                                                               
+plot ( na.patterns )
+                                                                               
+```
+                                                                               
+Upper panel shows the fraction of observations missing on each predictor. Lower panel
+depicts a hierarchical cluster analysis of missingness combinations. The similarity measure shown on the Y -axis is the fraction of observations for which both variables are missing.
+
+#### MACR test
+
+Before deciding how to impute the data, we will need to examine the missing data patterns.  A visualization of the missing values in variables shown as follows:                                                                           
+                                                                               
+```{r}
+suppressMessages(suppressWarnings(library(MissMech)))
+out <- TestMCARNormality(data = wine_train[,c("ResidualSugar","Chlorides", "FreeSulfurDioxide","TotalSulfurDioxide","pH","Sulphates","Alcohol","STARS" )])
+out
+```
+
+Hawkins Test:
+
+    P-value for the Hawkins test of normality and homoscedasticity:  0 
+
+    Either the test of multivariate normality or homoscedasticity (or both) is rejected.
+    Provided that normality can be assumed, the hypothesis of MCAR is 
+    rejected at 0.05 significance level. 
+
+Non-Parametric Test:
+
+    P-value for the non-parametric test of homoscedasticity:  0.752 
+
+    Reject Normality at 0.05 significance level.
+    There is not sufficient evidence to reject MCAR at 0.05 significance level.
+    
+So we conclude that the assumption that missing values has a completely random pattern is valid. 
+
+#### 2.1.2 Multivariate Imputation via Chained Equation
+                                                                               
+Impute the missing data for further analysis.
+
+```{r}
+suppressMessages(suppressWarnings(library(mice)))
+
+impData_0 <- wine_train
+init <- mice(impData_0[,-1], maxit=0) 
+meth <- init$method
+predM <- init$predictorMatrix
+
+impData_0[,c('LabelAppeal','AcidIndex','STARS')] <- lapply(impData_0[,c('LabelAppeal','AcidIndex','STARS')], as.factor)
+
+#skip variables from imputation but still be predictors
+#meth[c("TARGET ","FixedAcidity","VolatileAcidity","CitricAcid","Density"," LabelAppeal","AcidIndex")] <- ""
+
+# specify the methods for imputing the missing values
+meth[c("ResidualSugar","Chlorides","FreeSulfurDioxide","TotalSulfurDioxide","pH",        "Sulphates","Alcohol")]<-"norm" 
+meth[c("STARS")]<-"polyreg"
+
+# impute 5 data sets for the missing values in the data without removal of some records
+impData <- mice(impData_0[,-1], m=5, method=meth, predictorMatrix=predM,printFlag=FALSE, maxit=50,seed=500)
+
+#compare the distributions of original and imputed data
+densityplot(impData)
+
+# get back the completed dataset where the missing values have been replaced with the imputed values 
+wine_impute <- complete(impData)
+
+
+#write.csv(wine_impute,'wine_impute.csv')
+
+#wine_impute <- read.csv('D:/Rstudio_projects/DATA621/wine_impute.csv')
+#wine_impute <- wine_impute[,-1]
+
+suppressMessages(suppressWarnings(library(DataExplorer)))
+miss_plot <- plot_missing(wine_impute)
+miss_plot
+```
+
+
+#### 2.2 Collinearity
+
+```{r}
+# Plot a correlation graph
+suppressMessages(suppressWarnings(library(corrplot)))
+
+wine_impute[,c('LabelAppeal','AcidIndex','STARS')] <- lapply(wine_impute[,c('LabelAppeal','AcidIndex','STARS')], as.numeric)
+
+# calculate Pearson correlation between predictors.
+traincor <- cor(wine_impute,use = "na.or.complete")
+
+cex.before <- par("cex")
+par(cex = 0.6)
+corrplot(traincor, method = "number",number.cex = .97, cl.cex = 1/par("cex"))
+par(cex = cex.before)
+#corr
+```
+
+
+#### VIF test
+
+```{r}
+library(usdm)
+vif(wine_impute[,-c(1,2)])
+```
+
+```{r}
+Cor <- cor(wine_impute)
+suppressMessages(suppressWarnings(library(caret)))
+(highCor <- findCorrelation(Cor, cutoff = 0.75))
+```
+
+Using findCorrelation function in caret package also suggests there is no collinearities needs to be watched and no variable needs to be eliminated.
+
+We also treat'STARS' differently to getn a different dataset.
+
+### Looking for Patterns in the 'STARS' NA Values:
+
+Next, due to such a high NA percent ***(`r format(100 * (sum(is.na(wine_training_data$STARS))/nrow(wine_training_data)), digits=2, nsmall=2)`%)***
+
+Note that there are no ZEROS in the STARS field, 1 is the min:
+
+```{r warning=FALSE, echo=F, message=FALSE}
+min(wine_training_data$STARS[!is.na(wine_training_data$STARS)])
+```
+
+Graphically, it seems that a blank stars field is analagous to a ZERO (see chart below).
+
+```{r warning=FALSE, echo=T, message=FALSE}
+wine_training_data$STARS[is.na(wine_training_data$STARS)] <- 0
+
+#wine_training_data <- do_factors(wine_training_data)
+
+m0 <- mean(wine_training_data$TARGET[wine_training_data$STARS == 0])
+m1 <- mean(wine_training_data$TARGET[wine_training_data$STARS == 1])
+m2 <- mean(wine_training_data$TARGET[wine_training_data$STARS == 2])
+m3 <- mean(wine_training_data$TARGET[wine_training_data$STARS == 3])
+m4 <- mean(wine_training_data$TARGET[wine_training_data$STARS == 4])
+
+stars_summary_df <- data.frame(cbind(num_stars = c(0,1,2,3,4), mean_target = c(m0,m1,m2,m3,m4)))
+stars_summary_df
+
+ggplot(stars_summary_df, aes(num_stars, mean_target)) + geom_point(shape=1, size=5) + geom_smooth(method=lm,se=FALSE)+theme(axis.text.x=element_text(size=rel(0.2)))
+```
+
+Though this calculation may be imperfect at the moment, we will show later that the calculation is to be discarded, and thus not worth figuring out a closer approximation for NA's replacement in the ***STARS*** field.
+
+After the fill, we have what looks like a ***Zero-Inflated*** model on our hands.
+
+```{r warning=FALSE, echo=T, message=FALSE}
+ggplot(wine_training_data, aes(TARGET, fill = STARS)) + geom_histogram(binwidth=1, bins = 8,  position="dodge",fill=I('grey'),col=I('black'))
+```
+
+
+##3. BUILD MODELS (25 Points)
+
+**Specification:**
+Using the training data set, build at least two different poisson regression models, at least two different negative binomial regression models, and at least two multiple linear regression models, using different variables (or the same variables with different transformations). Sometimes poisson and negative binomial regression models give the same results. If that is the case, comment on that. Consider changing the input variables if that occurs so that you get different models. Although not covered in class, you may also want to consider building zero-inflated poisson and negative binomial regression models. You may select the variables manually, use an approach such as Forward or Stepwise, use a different approach such as trees, or use a combination of techniques. Describe the techniques you used. If you manually selected a variable for inclusion into the model or exclusion into the model, indicate why this was done.
+
+Discuss the coefficients in the models, do they make sense? In this case, about the only thing you can comment on is the number of stars and the wine label appeal. However, you might comment on the coefficient and magnitude of variables and how they are similar or different from model to model. For example, you might say "pH seems to have a major positive impact in my poisson regression model, but a negative effect in my multiple linear regression model". Are you keeping the model even though it is counter intuitive? Why? The boss needs to know.
+
+
+We will build 6 data sets from our training data:
+* TRAINING set where NAs were replaced by multivariate imputation.
+* TRAINING set where NAs were replaced by ZEROs.
+* TRAINING set where NAs were ***NOT*** replaced by ZEROs.
+* TEST set where NAs were replaced by multivariate imputation.
+* TEST set where NAs were replaced by ZEROs.
+* TEST set where NAs were ***NOT*** replaced by ZEROs.
+
+```{r}
+library(grid)
+library(vcd)
+ fit <- goodfit(wine_impute$TARGET)
+summary(fit) 
+
+fit <- goodfit(wine_impute$TARGET,type = "binomial")
+summary(fit) 
+
+fit <- goodfit(wine_impute$TARGET,type = "nbinomial")
+summary(fit) 
+
+```
+
+### 3.1  Poisson GLM:"NAs replaced by imputation" and Zero-inflated Poinsson Model
+
+In part 2 function, missing values were filled by multivariate impuation via chained equation. Now we will these dataset to calculate the coefficients.
+
+Before we build models, we split the data into train and test.
+
+```{r}
+require(caTools) 
+set.seed(123)  
+sample <- sample.split(wine_impute,SplitRatio = 0.75) 
+train <- subset(wine_impute,sample ==TRUE)
+test <- subset(wine_impute, sample==FALSE)
+```
+
+#### 3.1.1 Build the model
+```{r}
+glm_full <- glm(TARGET ~  ., family = poisson, data = train)
+glm_null <- glm(TARGET ~  1, family = poisson, data = train)
+fit.poisson.imp <-step(glm_full,direction='backward',family = poisson, data = train, trace = FALSE)
+  
+summary(fit.poisson.imp)
+```
+
+#### 3.1.2 Model diagnostics and adjustment
+
+```{r}
+#good-of-fitness test
+p_poisson <- 1-pchisq(summary(fit.poisson.imp)$deviance, summary(fit.poisson.imp)$df.residual)
+cat("p-value:" ,p_poisson,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_1 <- deviance(fit.poisson.imp)/fit.poisson.imp$df.residual
+dispersiontest(fit.poisson.imp)   # library(AER)
+#c = 0 equidispersion, c > 0 is overdispersed
+
+#Check for zero inflation
+fit.poisson.imp_zeroinf <- zeroinfl(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS, data=train, dist="poisson")   
+#library(pscl)
+names(vuong(fit.poisson.imp, fit.poisson.imp_zeroinf))
+
+summary(fit.poisson.imp_zeroinf)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.poisson.imp))  #library(faraway)
+
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.poisson.imp, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+par(mfrow=c(3,5))
+for(i in 2:15){
+  plotResiduals(train[,i], simulationOutput$scaledResiduals,xlab=colnames(train)[i])
+}
+
+
+
+```
+The GOF test indicates that the Poisson model does not fit the data (p < 0.05).
+
+```{r}
+# outlier test
+outlierTest(fit.poisson.imp)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.poisson.imp)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 11289, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.poisson.imp_11289 <- update(fit.poisson.imp,subset=c(-11289))
+compareCoefs(fit.poisson.imp, fit.poisson.imp_11289 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 11289 is not influential.
+
+
+```{r}
+#suppressMessages(suppressWarnings(library(car)))
+residualPlots(fit.poisson.imp,layout = c(3, 4),ask=F)
+
+glm_full_aj <- glm(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS+log(LabelAppeal+3)+I(AcidIndex^2)+I(STARS^2), family = poisson, data = train) 
+
+fit.poisson.imp.aj <-step(glm_full_aj,direction='backward',family = poisson, data = train, trace = FALSE)
+
+residualPlots(fit.poisson.imp.aj,layout = c(3, 4),ask=F)
+
+summary(fit.poisson.imp.aj)
+
+```
+
+#### 3.1.3 Model Interpretation
+```{r}
+coef <- summary(fit.poisson.imp.aj)$coefficients[,1]
+var.name <- variable.names(fit.poisson.imp.aj) 
+effects <- exp(coef)
+kable(round(interpretation <- cbind(coef,effects),2))
+```
+
+#### 3.1.4 new Model diagnostics 
+```{r}
+#good-of-fitness test
+p_poisson_aj <- 1-pchisq(summary(fit.poisson.imp.aj)$deviance, summary(fit.poisson.imp)$df.residual)
+cat("p-value_aj:" ,p_poisson_aj,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_1 <- deviance(fit.poisson.imp.aj)/fit.poisson.imp.aj$df.residual
+dispersiontest(fit.poisson.imp.aj)   # library(AER)
+#c = 0 equidispersion, c > 0 is overdispersed
+```
+
+
+c =1.2 >0. The assumption of equidispersion is not rejected. 
+
+```{r}
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.poisson.imp.aj, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.poisson.imp.aj))  #library(faraway)
+
+```
+
+
+```{r}
+# outlier test
+outlierTest(fit.poisson.imp.aj)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.poisson.imp.aj)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 2729, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.poisson.imp_2729 <- update(fit.poisson.imp.aj,subset=c(-2729))
+compareCoefs(fit.poisson.imp.aj, fit.poisson.imp_2729 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 2729 is not influential.
+
+We then use rootogram approach to test the assessment of fit as it is an improved test for a count regression model 
+```{r}
+# check the good of fitness of the poisson model
+#install.packages("countreg", repos="http://R-Forge.R-project.org")
+countreg::rootogram(fit.poisson.imp.aj)
+```
+
+The bar hanging from each point on the theoretical Poisson fit (red line) represents the difference between expected and observed counts. When a bar hanging below 0, it is underfitting. When a bar hanging above 0, it is overfitting. We can see that all variables have either underfitting or overfitting problem except the No.7 variable, "TotalSulfurDioxide". 
+
+#### 3.1.5 Evaluation of the model
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_1 <- 1 - fit.poisson.imp.aj$deviance / fit.poisson.imp.aj$null.deviance)
+
+ #or
+#(pR2 <- 1- logLik(logitfit.1)/logLik(logit.null))
+
+# Log likelihood
+(logLik_1<-logLik(fit.poisson.imp.aj))
+
+# AIC
+AIC_1 <- fit.poisson.imp.aj$aic
+BIC_1 <- BIC(fit.poisson.imp.aj)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_1<- cbind(test, 
+      Mean = predict(fit.poisson.imp.aj, newdata=test, type="response"), 
+      SE = predict(fit.poisson.imp.aj, newdata=test, type="response", se.fit=T)$se.fit
+      )
+
+evl_df_1 <- as.data.frame(aggregate(ndf_1[, 16], list(ndf_1$TARGET), mean))
+evl_df_1 <- cbind(evl_df_1,aggregate(ndf_1[, 17], list(ndf_1$TARGET), mean)[,2])
+colnames(evl_df_1) <- c('TARGET','Mean','SE')
+evl_df_1
+```
+
+#### 3.1.5 Evaluation of the zeroinflated model
+```{r}
+
+# goodness of fit: pseudo R squared
+zeroinf_null <- update(fit.poisson.imp_zeroinf, . ~ 1) 
+(pR2_1z <- 1- logLik(fit.poisson.imp_zeroinf)[1]/logLik(zeroinf_null)[1])
+
+#dispersion
+c_1z <- deviance(fit.poisson.imp_zeroinf)/fit.poisson.imp_zeroinf$df.residual
+
+# Log likelihood
+(logLik_1z<-logLik(fit.poisson.imp_zeroinf))
+
+# AIC
+AIC_1z <- AIC(fit.poisson.imp_zeroinf)
+BIC_1z <- BIC(fit.poisson.imp_zeroinf)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_1z<- cbind(test, 
+      Count = predict(fit.poisson.imp_zeroinf, newdata=test, type = "count"), 
+      Zero = predict(fit.poisson.imp_zeroinf, newdata=test, type = "zero")
+      )
+
+evl_df_1z <- as.data.frame(aggregate(ndf_1z[, 16], list(ndf_1z$TARGET), mean))
+evl_df_1z <- cbind(evl_df_1z,aggregate(ndf_1z[, 17], list(ndf_1z$TARGET), mean)[,2])
+colnames(evl_df_1z) <- c('TARGET','Count','Zero')
+evl_df_1z
+```
+
+
+### 3.2 Quasibinomial GLM:"NAs replaced by imputation" and 
+
+To deal with the overdispersion, we will fit the modle with "quasipoisson".
+
+#### 3.2.1 Build the model
+```{r}
+fit.qp.imp <- update(fit.poisson.imp.aj,family=quasipoisson)
+
+summary(fit.qp.imp)
+
+residualPlots(fit.qp.imp,layout = c(3, 4),ask=F)
+
+```
+
+The dispersion parameter is estimated to be 0.89, the dispersion isless than one. The conditional variance is smaller than the conditional mean. So we have under-dispersion.
+
+#### 3.2.2 Model diagnostics and adjustment
+
+```{r}
+#good-of-fitness test
+p_qp <- 1-pchisq(summary(fit.qp.imp)$deviance, summary(fit.qp.imp)$df.residual)
+cat("p-value:" ,p_qp,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_2 <- deviance(fit.qp.imp)/fit.qp.imp$df.residual
+#c = 0 equidispersion, c > 0 is overdispersed
+
+#Check for zero inflation
+fit.qp.imp_zeroinf<-fit.poisson.imp_zeroinf
+AIC(fit.qp.imp, fit.poisson.imp_zeroinf)
+ 
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.qp.imp))  #library(faraway)
+
+par(mfrow=c(3,5))
+for(i in 2:15){
+  plotResiduals(train[,i], simulationOutput$scaledResiduals,xlab=colnames(train)[i])
+}
+
+
+```
+The GOF test indicates that the Poisson model does not fit the data (p < 0.05).
+
+```{r}
+# outlier test
+outlierTest(fit.qp.imp)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.qp.imp)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 11289, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.qp.imp_11289 <- update(fit.qp.imp,subset=c(-11289))
+compareCoefs(fit.qp.imp, fit.qp.imp_11289 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 11289 is not influential.
+
+#### 3.2.4 Interpretation
+```{r}
+coef <- summary(fit.qp.imp)$coefficients[,1]
+var.name <- variable.names(fit.qp.imp) 
+effects <- exp(coef)
+kable(round(interpretation <- cbind(coef,effects),2))
+```
+
+#### 3.2.5 Evaluation of the model
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_2 <- 1 - fit.qp.imp$deviance / fit.qp.imp$null.deviance)
+
+
+# Log likelihood
+(logLik_2<-logLik(fit.qp.imp))
+
+# AIC
+AIC_2 <- AIC(fit.qp.imp)
+BIC_2 <- BIC(fit.qp.imp)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_2<- cbind(test, 
+      Mean = predict(fit.qp.imp, newdata=test, type="response"), 
+      SE = predict(fit.qp.imp, newdata=test, type="response", se.fit=T)$se.fit
+      )
+
+evl_df_2 <- as.data.frame(aggregate(ndf_2[, 16], list(ndf_2$TARGET), mean))
+evl_df_2 <- cbind(evl_df_2,aggregate(ndf_2[, 17], list(ndf_2$TARGET), mean)[,2])
+colnames(evl_df_2) <- c('TARGET','Mean','SE')
+evl_df_2
+```
+
+#### 3.2.6 Evaluation of the zeroinflated model
+```{r}
+# goodness of fit: pseudo R squared
+zeroinf_null <- update(fit.qp.imp_zeroinf, . ~ 1) 
+(pR2_2z <- 1- logLik(fit.qp.imp_zeroinf)[1]/logLik(zeroinf_null)[1])
+
+# Log likelihood
+(logLik_2z<-logLik(fit.qp.imp_zeroinf))
+
+#dispersion
+c_2z <- deviance(fit.qp.imp_zeroinf)/fit.qp.imp_zeroinf$df.residual
+
+# AIC
+AIC_2z <- AIC(fit.qp.imp_zeroinf)
+BIC_2z <- BIC(fit.qp.imp_zeroinf)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_2z<- cbind(test, 
+      Count = predict(fit.qp.imp_zeroinf, newdata=test, type = "count"), 
+      Zero = predict(fit.qp.imp_zeroinf, newdata=test, type = "zero")
+      )
+
+evl_df_2z <- as.data.frame(aggregate(ndf_2z[, 16], list(ndf_2z$TARGET), mean))
+evl_df_2z <- cbind(evl_df_2z,aggregate(ndf_2z[, 17], list(ndf_2z$TARGET), mean)[,2])
+colnames(evl_df_2z) <- c('TARGET','Count','Zero')
+evl_df_2z
+```
+
+### 3.3 Negative Binomial GLM:"NAs replaced by imputation" and Zero-inflated Negative Binomial Model
+
+In part 2 function, missing values were filled by multivariate impuation via chained equation. Now we will use the completed dataset to calculate the coefficients.
+
+#### 3.3.1 Build the model
+```{r}
+glm_full_nb <- glm.nb(TARGET ~  ., data = train)
+glm_null_nb <- glm.nb(TARGET ~  1, data = train)
+
+fit.nb.imp <- step(glm_full_nb,direction="backward",trace=F)
+
+summary(fit.nb.imp)
+```
+
+#### 3.3.2 Model diagnostics and adjustment
+
+```{r}
+#five-percent critical value for a chi-squared with 909 d.f. is
+qchisq(0.95, df.residual(fit.nb.imp))
+
+#good-of-fitness test
+p_nb <- 1-pchisq(summary(fit.nb.imp)$deviance, summary(fit.nb.imp)$df.residual)
+cat("p-value:" ,p_nb,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_3 <- deviance(fit.nb.imp)/fit.nb.imp$df.residual
+#c = 0 equidispersion, c > 0 is overdispersed
+
+#Check for zero inflation
+fit.nb.imp_zeroinf <- zeroinfl(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS, data=train, dist="negbin")    #library(pscl)
+AIC(fit.nb.imp, fit.nb.imp_zeroinf)
+summary(fit.nb.imp_zeroinf)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.nb.imp))  #library(faraway)
+
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.nb.imp, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+par(mfrow=c(3,5))
+for(i in 2:15){
+  plotResiduals(train[,i], simulationOutput$scaledResiduals,xlab=colnames(train)[i])
+}
+
+```
+
+The GOF test indicates that the Negative Binomial model does not fit the data (p < 0.05).
+
+```{r}
+# outlier test
+outlierTest(fit.nb.imp)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.nb.imp)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 11289, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.nb.imp_11289 <- update(fit.nb.imp,subset=c(-11289))
+compareCoefs(fit.nb.imp, fit.nb.imp_11289 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 11289 is not influential.
+
+Then adjust the model by adding high order terms or log form for "LabelAppeal", "AcidIndex" and "STARS" to see whether we can improve the fit.
+```{r}
+#suppressMessages(suppressWarnings(library(car)))
+residualPlots(fit.nb.imp,layout = c(3, 4),ask=F)
+
+glm_nb_full_aj <- glm.nb(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS+log(LabelAppeal+3)+I(AcidIndex^2)+I(STARS^2), data = train) 
+
+fit.nb.imp.aj <-step(glm_nb_full_aj,direction='backward',data = train, trace = FALSE)
+
+residualPlots(fit.nb.imp.aj,layout = c(3, 4),ask=F)
+
+summary(fit.nb.imp.aj)
+
+```
+
+#### 3.3.3 new Model diagnostics 
+```{r}
+#good-of-fitness test
+(p_nb <- 1-pchisq(summary(fit.nb.imp)$deviance, summary(fit.nb.imp)$df.residual))
+(p_nb_aj <- 1-pchisq(summary(fit.nb.imp.aj)$deviance, summary(fit.nb.imp.aj)$df.residual))
+cat("p-value_aj:" ,p_poisson_aj,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+deviance(fit.nb.imp.aj)/fit.nb.imp.aj$df.residual
+#c = 0 equidispersion, c > 0 is overdispersed
+```
+
+
+c =1.2 >0. The assumption of equidispersion is not rejected. 
+
+```{r}
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.nb.imp.aj, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.nb.imp.aj))  #library(faraway)
+
+```
+
+
+```{r}
+# outlier test
+outlierTest(fit.nb.imp.aj)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.nb.imp.aj)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 2729, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.nb.imp_11289 <- update(fit.nb.imp.aj,subset=c(-11289))
+compareCoefs(fit.nb.imp.aj, fit.nb.imp_11289 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 11289 is not influential.
+
+We then use rootogram approach to test the assessment of fit as it is an improved test for a count regression model 
+```{r}
+# check the good of fitness of the poisson model
+#install.packages("countreg", repos="http://R-Forge.R-project.org")
+countreg::rootogram(fit.nb.imp.aj)
+```
+
+The bar hanging from each point on the theoretical Poisson fit (red line) represents the difference between expected and observed counts. When a bar hanging below 0, it is underfitting. When a bar hanging above 0, it is overfitting. We can see that all variables have either underfitting or overfitting problem except the No.7 variable, "TotalSulfurDioxide".
+
+#### 3.3.4 Model Interpretation
+```{r}
+coef <- summary(fit.nb.imp.aj)$coefficients[,1]
+var.name <- variable.names(fit.nb.imp.aj) 
+effects <- exp(coef)
+kable(round(interpretation <- cbind(coef,effects),2))
+```
+
+
+#### 3.3.5 Evaluation of the model
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_3 <- 1 - fit.nb.imp.aj$deviance / fit.nb.imp.aj$null.deviance)
+
+#or
+#(pR2 <- 1- logLik(logitfit.1)/logLik(logit.null))
+
+# Log likelihood
+(logLik_3<-logLik(fit.nb.imp.aj))
+
+# AIC
+AIC_3 <- fit.nb.imp.aj$aic
+BIC_3 <- BIC(fit.nb.imp.aj)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_3<- cbind(test, 
+      Mean = predict(fit.nb.imp.aj, newdata=test, type="response"), 
+      SE = predict(fit.nb.imp.aj, newdata=test, type="response", se.fit=T)$se.fit
+      )
+
+evl_df_3 <- as.data.frame(aggregate(ndf_3[, 16], list(ndf_3$TARGET), mean))
+evl_df_3 <- cbind(evl_df_3,aggregate(ndf_3[, 17], list(ndf_3$TARGET), mean)[,2])
+colnames(evl_df_3) <- c('TARGET','Mean','SE')
+evl_df_3
+```
+
+#### 3.3.5 Evaluation of the zeroinflated model
+```{r}
+# goodness of fit: pseudo R squared
+zeroinf_null <-zeroinfl(TARGET ~ 1,train,dist="poisson")
+(pR2_3z <- 1- logLik(fit.nb.imp_zeroinf)[1]/logLik(zeroinf_null)[1])
+
+# Log likelihood
+(logLik_3z<-logLik(fit.nb.imp_zeroinf))
+
+#dispersion
+c_3z <- deviance(fit.nb.imp_zeroinf)/fit.nb.imp_zeroinf$df.residual
+
+# AIC
+AIC_3z <- AIC(fit.nb.imp_zeroinf)
+BIC_3z <- BIC(fit.nb.imp_zeroinf)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_3z<- cbind(test, 
+      Count = predict(fit.nb.imp_zeroinf, newdata=test, type = "count"), 
+      Zero = predict(fit.nb.imp_zeroinf, newdata=test, type = "zero")
+      )
+
+evl_df_3z <- as.data.frame(aggregate(ndf_3z[, 16], list(ndf_3z$TARGET), mean))
+evl_df_3z <- cbind(evl_df_3z,aggregate(ndf_3z[, 17], list(ndf_3z$TARGET), mean)[,2])
+colnames(evl_df_3z) <- c('TARGET','Count','Zero')
+evl_df_3z
+```
+
+### 3.4  Multiple Linear Regression Model:"NAs replaced by imputation"
+
+In part 2 function, missing values were filled by multivariate impuation via chained equation. Now we will use the completed dataset to calculate the coefficients.
+
+#### 3.4.1 Build the model
+```{r}
+glm_full_lm <- glm(TARGET ~ .,data=train, family = gaussian)
+glm_null_lm <- glm(TARGET ~ 1,data=train, family = gaussian)
+fit.lm.imp <- step(glm_full_lm,direction="backward",trace=F)
+summary(fit.lm.imp)
+```
+
+#### 3.4.2 Model diagnostics and adjustment
+
+```{r}
+#good-of-fitness test
+p_lm <-1-pchisq(summary(fit.lm.imp)$deviance, summary(fit.lm.imp)$df.residual)
+cat("p-value:" ,p_lm,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_4 <- deviance(fit.lm.imp)/fit.lm.imp$df.residual
+#c = 0 equidispersion, c > 0 is overdispersed
+
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.lm.imp, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.lm.imp))  #library(faraway)
+
+par(mfrow=c(3,5))
+for(i in 2:15){
+  plotResiduals(train[,i], simulationOutput$scaledResiduals,xlab=colnames(train)[i])
+}
+
+#suppressMessages(suppressWarnings(library(car)))
+residualPlots(fit.lm.imp,layout = c(3, 4),ask=F)
+
+```
+The GOF test indicates that the Poisson model does not fit the data (p < 0.05).
+
+```{r}
+# outlier test
+outlierTest(fit.lm.imp)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.lm.imp)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 11289, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.lm.imp_11289 <- update(fit.lm.imp,subset=c(-11289))
+compareCoefs(fit.lm.imp, fit.lm.imp_11289 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 11289 is not influential.
+
+Then adjust the model by adding high order terms or log form for "LabelAppeal", "AcidIndex" and "STARS" to see whether we can improve the fit.
+```{r}
+#suppressMessages(suppressWarnings(library(car)))
+residualPlots(fit.lm.imp,layout = c(3, 4),ask=F)
+
+glm_lm_full_aj <- glm(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS+log(LabelAppeal+3)+I(AcidIndex^2)+I(STARS^2), data = train,family=gaussian) 
+
+fit.lm.imp.aj <-step(glm_lm_full_aj,direction='backward',data = train, trace = FALSE)
+
+residualPlots(fit.lm.imp.aj,layout = c(3, 4),ask=F)
+
+summary(fit.lm.imp.aj)
+
+```
+
+#### 3.4.3 Interpretation
+```{r}
+coef <- summary(fit.lm.imp.aj)$coefficients[,1]
+var.name <- variable.names(fit.lm.imp.aj) 
+effects <- exp(coef)
+kable(round(interpretation <- cbind(coef,effects),2))
+```
+
+#### 3.4.4 new Model diagnostics 
+```{r}
+#good-of-fitness test
+(p_lm <- 1-pchisq(summary(fit.lm.imp)$deviance, summary(fit.lm.imp)$df.residual))
+(p_lm_aj <- 1-pchisq(summary(fit.lm.imp.aj)$deviance, summary(fit.lm.imp.aj)$df.residual))
+cat("p-value_aj:" ,p_poisson_aj,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_4 <-deviance(fit.lm.imp.aj)/fit.lm.imp.aj$df.residual
+#c = 0 equidispersion, c > 0 is overdispersed
+```
+
+
+c =1.2 >0. The assumption of equidispersion is not rejected. 
+
+```{r}
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.lm.imp.aj, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.lm.imp.aj))  #library(faraway)
+
+```
+
+
+```{r}
+# outlier test
+outlierTest(fit.lm.imp.aj)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.lm.imp.aj)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 2729, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.lm.imp_11289 <- update(fit.lm.imp.aj,subset=c(-11289))
+compareCoefs(fit.lm.imp.aj, fit.lm.imp_11289 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 11289 is not influential.
+
+We then use rootogram approach to test the assessment of fit as it is an improved test for a count regression model 
+```{r}
+# check the good of fitness of the poisson model
+#install.packages("countreg", repos="http://R-Forge.R-project.org")
+countreg::rootogram(fit.lm.imp.aj)
+```
+
+#### 3.4.4 Evaluation of the model
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_4 <- 1 - fit.lm.imp.aj$deviance / fit.lm.imp.aj$null.deviance)
+
+# Log likelihood
+(logLik_4<-logLik(fit.lm.imp.aj))
+
+# AIC
+AIC_4 <- fit.lm.imp.aj$aic
+BIC_4 <- BIC(fit.lm.imp.aj)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_4<- cbind(test, 
+      Mean = predict(fit.lm.imp.aj, newdata=test, type="response"), 
+      SE = predict(fit.lm.imp.aj, newdata=test, type="response", se.fit=T)$se.fit
+      )
+
+evl_df_4 <- as.data.frame(aggregate(ndf_4[, 16], list(ndf_4$TARGET), mean))
+evl_df_4 <- cbind(evl_df_4,aggregate(ndf_4[, 17], list(ndf_4$TARGET), mean)[,2])
+colnames(evl_df_4) <- c('TARGET','Mean','SE')
+evl_df_4
+```
+
+### 3.5  Multinomial Logistic Regression Model:"NAs replaced by imputation"
+
+```{r}
+suppressMessages(suppressWarnings(library(mlogit)))
+
+train_fct <- train
+train_fct[,c('TARGET','LabelAppeal','STARS')] <- lapply(train_fct[,c('TARGET','LabelAppeal','STARS')] ,as.factor)
+  
+# Reshaping the data from wide to long format
+#mydata$mode<-as.factor(mydata$mode)
+mldata<-mlogit.data(train, varying=NULL, choice="TARGET", shape="wide")
+
+# Multinomial logit model 
+fit.ml.imp <- mlogit(TARGET ~ 1 | FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS,data=mldata, reflevel=levels(train_fct$TARGET)[1])
+summary(fit.ml.imp)
+
+ # goodness of fit: pseudo R squared
+# McFadden's R squared
+ml_null <-mlogit(TARGET ~ 1,data=mldata, reflevel=levels(train_fct$TARGET)[1])
+(pR2_5 <- 1- logLik(fit.ml.imp)[1]/logLik(ml_null)[1])
+# Log likelihood
+(logLik_5<-logLik(fit.lm.imp.aj))
+
+# AIC
+AIC_5 <- fit.lm.imp.aj$aic
+BIC_5 <- BIC(fit.lm.imp.aj)
+
+a<-as.data.frame(fitted(fit.ml.imp,type = "outcome",outcome = F) )
+b<-fitted(fit.ml.imp,type = "outcome",outcome = T)
+pred <- list()
+for(i in 1:length(b)){
+  pred <- append(pred,names(a[i,])[apply(a[i,], 1, function(x) which(x == b[i]))])
+}
+
+ndf_5<- cbind(train, unlist(pred),b)
+colnames(ndf_5)[which(colnames(ndf_5)=='unlist(pred)')]<-'pred'
+ndf_5$pred <- as.numeric(as.character(ndf_5$pred))
+
+evl_df_5 <- as.data.frame(aggregate(ndf_5[, 16], list(ndf_5$TARGET), mean))
+colnames(evl_df_5) <- c('TARGET','pred')
+evl_df_5
+```
+
+
+Simple Step Selection will be used for attribute selection, and we will build 3 models for both sets, plus a "zerinfl" negative binomial, yielding a total of 7 models:
+
+```{r warning=FALSE, message=FALSE}
+wine_training_data.zeros <- wine_training_data
+wine_training_data.nozeros <- wine_training_data[wine_training_data$STARS != 0,]
+
+cutoff.zeros <- nrow(wine_training_data.zeros)*.75
+wine_training_data.zeros.train <- wine_training_data.zeros[1:cutoff.zeros,]
+wine_training_data.zeros.test <- wine_training_data.zeros[(cutoff.zeros+1):nrow(wine_training_data.zeros),]
+
+cutoff.nozeros <- nrow(wine_training_data.nozeros)*.75
+wine_training_data.nozeros.train <- wine_training_data.nozeros[1:cutoff.nozeros,]
+wine_training_data.nozeros.test <- wine_training_data.nozeros[(cutoff.nozeros+1):nrow(wine_training_data.nozeros),]
+
+
+
+
+#wine_training_data.zeros <- do_factors(wine_training_data.zeros)
+#wine_training_data.nozeros <- do_factors(wine_training_data.nozeros)
+#wine_training_data.zeros.train <- do_factors(wine_training_data.zeros.train)
+#wine_training_data.zeros.test <- do_factors(wine_training_data.zeros.test)
+#wine_training_data.nozeros.train <- do_factors(wine_training_data.nozeros.train)
+#wine_training_data.nozeros.test <- do_factors(wine_training_data.nozeros.test)
+
+```
+
+* ***A Poisson GLM with SCORE: "Zeros-for-NAs"***
+* ***A Poisson GLM with SCORE: "NAs Removed"***
+* ***A Negative Binomial GLM with SCORE: "Zeros-for-NAs"***
+* ***A Negative Binomial GLM with SCORE: "NAs Removed"***
+* ***A Multiple Linear Regression Model with SCORE: "Zeros-for-NAs"***
+* ***A Multiple Linear Regression Model with SCORE: "NAs Removed"***
+* ***A Negative Binomial Model via "zeroinfl()": "Zeros-for-NAs"***
+
+***Summaries for these Models are below:***
+
+(To show our point regarding coefficients, we will show summaries for the 2 Negative Binomial Distributions.  Summaries of all 7 models, however, are located in the appendix).
+
+### 3.6  Poisson GLM and Zero-inflated Poisson:"Zeros-for-NAs"
+
+Poinsson glm and Zero-inflated Poisson regression will be fit using dataset in which NAs are filled by zero.
+
+```{r name="POISSON GLM ZEROS", message=FALSE, warning=FALSE, echo=T, eval=TRUE}
+fit.poisson.zeros <- step(glm(TARGET ~ . , family = poisson, data = wine_training_data.zeros.train), trace = FALSE)
+summary(fit.poisson.zeros)
+```
+
+
+####3.6.1 Model diagnostics and adjustment
+
+```{r}
+#good-of-fitness test
+p_poisson_zero <- 1-pchisq(summary(fit.poisson.zeros)$deviance, summary(fit.poisson.zeros)$df.residual)
+cat("p-value:" ,p_poisson,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_6<- deviance(fit.poisson.zeros)/fit.poisson.zeros$df.residual
+dispersiontest(fit.poisson.zeros)   # library(AER)
+#c = 0 equidispersion, c > 0 is overdispersed
+
+#Check for zero inflation
+fit.poisson.zeros_zeroinf <- zeroinfl(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS, data=wine_training_data.zeros.train, dist="poisson")    #library(pscl)
+AIC(fit.poisson.zeros, fit.poisson.zeros_zeroinf)
+summary(fit.poisson.zeros_zeroinf)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.poisson.zeros))  #library(faraway)
+
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.poisson.zeros, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+```
+
+The GOF test indicates that the Poisson model fit the data (p > 0.05).
+
+```{r}
+# outlier test
+outlierTest(fit.poisson.zeros)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.poisson.zeros)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 1630, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.poisson.zeros_1630 <- update(fit.poisson.zeros,subset=c(-1630))
+compareCoefs(fit.poisson.zeros, fit.poisson.zeros_1630 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 1630 is not influential.
+
+
+```{r}
+#suppressMessages(suppressWarnings(library(car)))
+residualPlots(fit.poisson.zeros,layout = c(3, 4),ask=F)
+
+glm_full_aj <- glm(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS+log(LabelAppeal+3)+I(AcidIndex^2)+I(STARS^2), family = poisson, data = wine_training_data.zeros.train) 
+
+fit.poisson.zeros_aj <-step(glm_full_aj,direction='backward',family = poisson, data = wine_training_data.zeros.train, trace = FALSE)
+
+residualPlots(fit.poisson.zeros_aj,layout = c(3, 4),ask=F)
+
+summary(fit.poisson.zeros_aj)
+
+```
+
+#### 3.6.3 Model Interpretation
+```{r}
+coef <- summary(fit.poisson.zeros_aj)$coefficients[,1]
+var.name <- variable.names(fit.poisson.zeros_aj) 
+effects <- exp(coef)
+kable(round(interpretation <- cbind(coef,effects),2))
+```
+
+#### 3.6.3 new Model diagnostics 
+```{r}
+#good-of-fitness test
+p_poisson_zero_aj <- 1-pchisq(summary(fit.poisson.zeros_aj)$deviance, summary(fit.poisson.zeros_aj)$df.residual)
+cat("p-value_aj:" ,p_poisson_aj,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_6 <-deviance(fit.poisson.zeros_aj)/fit.poisson.zeros_aj$df.residual
+dispersiontest(fit.poisson.zeros_aj)   # library(AER)
+#c = 0 equidispersion, c > 0 is overdispersed
+```
+
+
+c =1.15 >0. The assumption of equidispersion is not rejected. 
+
+```{r}
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.poisson.zeros_aj, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.poisson.zeros_aj))  #library(faraway)
+```
+
+
+```{r}
+# outlier test
+outlierTest(fit.poisson.zeros_aj)
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.poisson.zeros_aj)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 2729, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.poisson.zeros_aj_2729 <- update(fit.poisson.zeros_aj,subset=c(-2729))
+compareCoefs(fit.poisson.zeros_aj, fit.poisson.zeros_aj_2729 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 2729 is not influential.
+
+We then use rootogram approach to test the assessment of fit as it is an improved test for a count regression model 
+```{r}
+# check the good of fitness of the poisson model
+#install.packages("countreg", repos="http://R-Forge.R-project.org")
+countreg::rootogram(fit.poisson.zeros_aj)
+```
+
+The bar hanging from each point on the theoretical Poisson fit (red line) represents the difference between expected and observed counts. When a bar hanging below 0, it is underfitting. When a bar hanging above 0, it is overfitting. We can see that all variables have either underfitting or overfitting problem except the No.7 variable, "TotalSulfurDioxide". 
+
+#### 3.6.4 Evaluation of the model
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_zero_1 <- 1 - fit.poisson.zeros_aj$deviance / fit.poisson.zeros_aj$null.deviance)
+
+#or
+#(pR2 <- 1- logLik(logitfit.1)/logLik(logit.null))
+
+# Log likelihood
+(logLik_zero_1 <-logLik(fit.poisson.zeros_aj))
+
+# AIC
+AIC_zero_1 <- fit.poisson.zeros_aj$aic
+BIC_zero_1 <- BIC(fit.poisson.zeros_aj)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_zero_1<- cbind(wine_training_data.zeros.test, 
+      Mean = predict(fit.poisson.zeros, newdata=wine_training_data.zeros.test, type="response"), 
+      SE = predict(fit.poisson.zeros, newdata=wine_training_data.zeros.test, type="response", se.fit=T)$se.fit
+      )
+
+evl_df_zero_1 <- as.data.frame(aggregate(ndf_zero_1[, 17], list(ndf_zero_1$TARGET), mean))
+evl_df_zero_1 <- cbind(evl_df_zero_1,aggregate(ndf_zero_1[, 18], list(ndf_zero_1 $TARGET), mean)[,2])
+colnames(evl_df_zero_1) <- c('TARGET','Mean','SE')
+
+```
+
+#### Evaluation of the zeroinflated model
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_zero_1z <- 1- logLik(fit.poisson.zeros_zeroinf)[1]/logLik(fit.poisson.zeros_zeroinf)[1])
+
+# Log likelihood
+(logLik_zero_1z<-logLik(fit.poisson.zeros_zeroinf))
+
+#dispersion
+c_zero_1z <- deviance(fit.poisson.zeros_zeroinf)/fit.poisson.zeros_zeroinf$df.residual
+
+# AIC
+AIC_zero_1z <- AIC(fit.poisson.zeros_zeroinf)
+BIC_zero_1z <- BIC(fit.poisson.zeros_zeroinf)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_zero_1z<- cbind(wine_training_data.zeros.test, 
+      Count = predict(fit.poisson.zeros_zeroinf, newdata=wine_training_data.zeros.test, type = "count"), 
+      Zero = predict(fit.poisson.zeros_zeroinf, newdata=wine_training_data.zeros.test, type = "zero")
+      )
+
+evl_df_zero_1z <- as.data.frame(aggregate(ndf_zero_1z[, 17], list(ndf_zero_1z$TARGET), mean))
+evl_df_zero_1z <- cbind(evl_df_zero_1z,aggregate(ndf_zero_1z[, 18], list(ndf_zero_1z$TARGET), mean)[,2])
+colnames(evl_df_zero_1z) <- c('TARGET','Count','Zero')
+
+```
+
+
+## 3.7 Poisson GLM: "NAs Removed" 
+
+####3.7.1 Build the initial model 
+```{r name="POISSON GLM ZEROS", message=FALSE, warning=FALSE, echo=T, eval=TRUE}
+fit.poisson.nozeros <- step(glm(TARGET ~ . , family = poisson, data = wine_training_data.nozeros.train), trace = FALSE)
+summary(fit.poisson.nozeros)
+
+```
+
+#### 3.7.2 Interpretation
+```{r}
+coef <- summary(fit.poisson.nozeros)$coefficients[,1]
+var.name <- variable.names(fit.poisson.nozeros) 
+effects <- exp(coef)
+kable(round(interpretation <- cbind(coef,effects),2))
+
+```
+
+
+####3.7.3 Model diagnostics and adjustment
+
+```{r}
+#good-of-fitness test
+p_poisson_nozero <- 1-pchisq(summary(fit.poisson.nozeros)$deviance, summary(fit.poisson.nozeros)$df.residual)
+cat("p-value:" ,p_poisson,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_7<-deviance(fit.poisson.nozeros)/fit.poisson.nozeros$df.residual
+dispersiontest(fit.poisson.nozeros)   # library(AER)
+#c = 0 equidispersion, c > 0 is overdispersed
+
+#Check for zero inflation
+fit.poisson.nozeros_zeroinf <- zeroinfl(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS, data=wine_training_data.nozeros.train, dist="poisson")    #library(pscl)
+AIC(fit.poisson.nozeros, fit.poisson.nozeros_zeroinf)
+summary(fit.poisson.nozeros_zeroinf)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.poisson.nozeros))  #library(faraway)
+
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.poisson.nozeros, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+#residual plots
+residualPlots(fit.poisson.nozeros)
+
+```
+
+The GOF test indicates that the Poisson model fit the data (p > 0.05).
+
+```{r}
+# outlier test
+outlierTest(fit.poisson.nozeros)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.poisson.nozeros)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 369, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.poisson.nozeros_369 <- update(fit.poisson.nozeros,subset=c(-369))
+compareCoefs(fit.poisson.nozeros, fit.poisson.nozeros_369 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 369 is not influential.
+
+#### 3.7.4 Evaluation of the model
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_nozero_1 <- 1 - fit.poisson.nozeros$deviance / fit.poisson.nozeros$null.deviance)
+
+#or
+#(pR2 <- 1- logLik(logitfit.1)/logLik(logit.null))
+
+# Log likelihood
+(logLik_nozero_1 <-logLik(fit.poisson.nozeros))
+
+# AIC
+AIC_nozero_1 <- fit.poisson.nozeros$aic
+BIC_nozero_1 <- BIC(fit.poisson.nozeros)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_nozero_1<- cbind(wine_training_data.nozeros.test, 
+      Mean = predict(fit.poisson.nozeros, newdata=wine_training_data.nozeros.test, type="response"), 
+      SE = predict(fit.poisson.nozeros, newdata=wine_training_data.nozeros.test, type="response", se.fit=T)$se.fit
+      )
+
+evl_df_nozero_1 <- as.data.frame(aggregate(ndf_nozero_1[, 17], list(ndf_nozero_1$TARGET), mean))
+evl_df_nozero_1 <- cbind(evl_df_nozero_1,aggregate(ndf_nozero_1[, 18], list(ndf_nozero_1$TARGET), mean)[,2])
+colnames(evl_df_nozero_1) <- c('TARGET','Mean','SE')
+evl_df_nozero_1
+```
+
+#### Evaluation of the zeroinflated model
+```{r}
+# goodness of fit: pseudo R squared
+zeroinf_null <-zeroinfl(TARGET ~ 1,wine_training_data.nozeros.train,dist="poisson")
+(pR2_nozero_1z <- 1- logLik(fit.poisson.nozeros_zeroinf)[1]/logLik(zeroinf_null)[1])
+
+# Log likelihood
+(logLik_nozero_1z<-logLik(fit.poisson.nozeros_zeroinf))
+
+#dispersion
+c_nozero_1z <- deviance(fit.poisson.nozeros_zeroinf)/fit.poisson.nozeros_zeroinf$df.residual
+
+# AIC
+AIC_nozero_1z <- AIC(fit.poisson.nozeros_zeroinf)
+BIC_nozero_1z <- BIC(fit.poisson.nozeros_zeroinf)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_nozero_1z<- cbind(wine_training_data.nozeros.test, 
+      Count = predict(fit.poisson.nozeros_zeroinf, newdata=wine_training_data.nozeros.test, type = "count"), 
+      Zero = predict(fit.poisson.nozeros_zeroinf, newdata=wine_training_data.nozeros.test, type = "zero")
+      )
+
+evl_df_nozero_1z <- as.data.frame(aggregate(ndf_nozero_1z[, 17], list(ndf_nozero_1z$TARGET), mean))
+evl_df_nozero_1z <- cbind(evl_df_nozero_1z,aggregate(ndf_nozero_1z[, 18], list(ndf_nozero_1z$TARGET), mean)[,2])
+colnames(evl_df_nozero_1z) <- c('TARGET','Count','Zero')
+evl_df_nozero_1z
+```
+
+
+
+## 3.8 Negative Binomial GLM with SCORE: "Zeros-for-NAs" 
+
+#### 3.8.1 Build the initial model
+
+```{r name="NB GLM ZEROS", message=FALSE, warning=FALSE, echo=TRUE, eval=TRUE}
+fit.nb.zeros <- step(glm.nb(TARGET ~ . , data = wine_training_data.zeros.train), trace = FALSE)
+summary(fit.nb.zeros)
+```
+
+#### 3.8.2 Model diagnostics and adjustment
+
+```{r}
+#good-of-fitness test
+p_nb_zero <- 1-pchisq(summary(fit.nb.zeros)$deviance, summary(fit.nb.zeros)$df.residual)
+cat("p-value:" ,p_poisson,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_8<-deviance(fit.nb.zeros)/fit.nb.zeros$df.residual
+
+#c = 0 equidispersion, c > 0 is overdispersed
+
+#Check for zero inflation
+fit.nb.zeros_zeroinf <- zeroinfl(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS, data=wine_training_data.zeros.train, dist="negbin")    #library(pscl)
+AIC(fit.nb.zeros, fit.nb.zeros_zeroinf)
+summary(fit.nb.zeros_zeroinf)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.nb.zeros))  #library(faraway)
+
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.nb.zeros, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+```
+
+The GOF test indicates that the Poisson model fit the data (p > 0.05).
+
+```{r}
+# outlier test
+outlierTest(fit.nb.zeros)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.nb.zeros)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 1630, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.nb.zeros_1630 <- update(fit.nb.zeros,subset=c(-1630))
+compareCoefs(fit.nb.zeros, fit.nb.zeros_1630 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 1630 is not influential.
+
+
+```{r}
+#suppressMessages(suppressWarnings(library(car)))
+residualPlots(fit.nb.zeros,layout = c(3, 4),ask=F)
+
+glm_full_aero_aj <- glm.nb(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS+log(LabelAppeal+3)+I(AcidIndex^2)+I(STARS^2), data = wine_training_data.zeros.train) 
+
+fit.nb.zeros_aj <-step(glm_full_aero_aj,direction='backward',data = wine_training_data.zeros.train, trace = FALSE)
+
+residualPlots(fit.nb.zeros_aj,layout = c(3, 4),ask=F)
+
+summary(fit.nb.zeros_aj)
+
+```
+
+#### 3.8.3 Interpretation
+```{r}
+coef <- summary(fit.nb.zeros_aj)$coefficients[,1]
+var.name <- variable.names(fit.nb.zeros_aj) 
+effects <- exp(coef)
+kable(round(interpretation <- cbind(coef,effects),2))
+```
+
+#### 3.8.4 new Model diagnostics 
+```{r}
+#good-of-fitness test
+p_nb_zero_aj <- 1-pchisq(summary(fit.nb.zeros_aj)$deviance, summary(fit.nb.zeros_aj)$df.residual)
+  cat("p_nb_zero_aj:" ,p_nb_zero_aj,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_8 <- deviance(fit.nb.zeros_aj)/fit.nb.zeros_aj$df.residual
+#c = 0 equidispersion, c > 0 is overdispersed
+```
+
+c =1.07 >0. The assumption of equidispersion is not rejected. 
+
+```{r}
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.nb.zeros_aj, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.nb.zeros_aj))  #library(faraway)
+
+```
+
+
+```{r}
+# outlier test
+outlierTest(fit.nb.zeros_aj)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.nb.zeros_aj)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 2729, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.nb.zeros_aj_2729 <- update(fit.nb.zeros_aj,subset=c(-2729))
+compareCoefs(fit.nb.zeros_aj, fit.nb.zeros_aj_2729 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 2729 is not influential.
+
+We then use rootogram approach to test the assessment of fit as it is an improved test for a count regression model 
+```{r}
+# check the good of fitness of the poisson model
+#install.packages("countreg", repos="http://R-Forge.R-project.org")
+countreg::rootogram(fit.nb.zeros_aj)
+```
+
+The bar hanging from each point on the theoretical Poisson fit (red line) represents the difference between expected and observed counts. When a bar hanging below 0, it is underfitting. When a bar hanging above 0, it is overfitting. We can see that all variables have either underfitting or overfitting problem except the No.7 variable, "TotalSulfurDioxide". 
+
+#### 3.8.5 Evaluation of the model
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_zero_2 <- 1 - fit.nb.zeros_aj$deviance / fit.nb.zeros_aj$null.deviance)
+
+
+# Log likelihood
+(logLik_zero_2 <-logLik(fit.nb.zeros_aj))
+
+# AIC
+AIC_zero_2 <- fit.nb.zeros_aj$aic
+BIC_zero_2 <- BIC(fit.nb.zeros_aj)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_zero_2<- cbind(wine_training_data.zeros.test, 
+      Mean = predict(fit.nb.zeros_aj, newdata=wine_training_data.zeros.test, type="response"), 
+      SE = predict(fit.nb.zeros_aj, newdata=wine_training_data.zeros.test, type="response", se.fit=T)$se.fit
+      )
+
+evl_df_zero_2 <- as.data.frame(aggregate(ndf_zero_2[, 17], list(ndf_zero_2$TARGET), mean))
+evl_df_zero_2 <- cbind(evl_df_zero_2,aggregate(ndf_zero_2[, 18], list(ndf_zero_2$TARGET), mean)[,2])
+colnames(evl_df_zero_2) <- c('TARGET','Mean','SE')
+evl_df_zero_2
+```
+
+#### Evaluation of the zeroinflated model
+```{r}
+# goodness of fit: pseudo R squared
+zero.zeroinf_null <- zeroinfl(TARGET ~ 1, data=wine_training_data.zeros.train, dist="negbin")
+(pR2_zero_2z <- 1- logLik(fit.nb.zeros_zeroinf)[1]/logLik(zero.zeroinf_null)[1] )
+  
+# Log likelihood
+(logLik_zero_2z<-logLik(fit.nb.zeros_zeroinf))
+
+#dispersion
+c_zero_2z <- deviance(fit.nb.zeros_zeroinf)/fit.nb.zeros_zeroinf$df.residual
+
+# AIC
+AIC_zero_2z <- AIC(fit.nb.zeros_zeroinf)
+BIC_zero_2z <- BIC(fit.nb.zeros_zeroinf)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_zero_2z<- cbind(wine_training_data.zeros.test, 
+      Count = predict(fit.nb.zeros_zeroinf, newdata=wine_training_data.zeros.test, type = "count"), 
+      Zero = predict(fit.nb.zeros_zeroinf, newdata=wine_training_data.zeros.test, type = "zero")
+      )
+
+evl_df_zero_2z <- as.data.frame(aggregate(ndf_zero_2z[, 17], list(ndf_zero_2z$TARGET), mean))
+evl_df_zero_2z <- cbind(evl_df_zero_2z,aggregate(ndf_zero_2z[, 18], list(ndf_zero_2z$TARGET), mean)[,2])
+colnames(evl_df_zero_2z) <- c('TARGET','Count','Zero')
+
+```
+
+
+## 3.9 Negative Binomial GLM with SCORE: "NAs Removed" 
+
+#### 3.9.1 Build the initial model
+
+```{r name="NB GLM NO ZEROS", message=FALSE, warning=FALSE, echo=TRUE, eval=TRUE}
+fit.nb.nozeros <- step(glm.nb(TARGET ~ . , data = wine_training_data.nozeros.train), trace = FALSE)
+summary(fit.nb.nozeros)
+```
+
+#### 3.9.2 Interpretation
+```{r}
+coef <- summary(fit.nb.nozeros)$coefficients[,1]
+var.name <- variable.names(fit.nb.nozeros) 
+effects <- exp(coef)
+kable(round(interpretation <- cbind(coef,effects),2))
+```
+
+#### 3.9.3 Model diagnostics and adjustment
+
+```{r}
+#good-of-fitness test
+p_nb_nozero <- 1-pchisq(summary(fit.nb.nozeros)$deviance, summary(fit.nb.nozeros)$df.residual)
+cat("p-value:" ,p_nb_nozero,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_9<-summary(fit.nb.nozeros)$deviance/summary(fit.nb.nozeros)$df.residual
+#c = 0 equidispersion, c > 0 is overdispersed
+
+#Check for zero inflation
+fit.nb.nozeros_zeroinf <- zeroinfl(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS, data=wine_training_data.nozeros.train, dist="negbin")    #library(pscl)
+AIC(fit.nb.nozeros, fit.nb.nozeros_zeroinf)
+summary(fit.nb.nozeros_zeroinf)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.nb.nozeros))  #library(faraway)
+
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.nb.nozeros, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+```
+
+The GOF test indicates that the Poisson model fit the data (p =1 > 0.05).
+
+
+```{r}
+# outlier test
+outlierTest(fit.nb.nozeros)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.nb.nozeros)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 369, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.nb.nozeros_369 <- update(fit.nb.nozeros,subset=c(-369))
+compareCoefs(fit.nb.nozeros, fit.nb.nozeros_369 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 1630 is not influential.
+
+
+```{r}
+#suppressMessages(suppressWarnings(library(car)))
+residualPlots(fit.nb.nozeros,layout = c(3, 4),ask=F)
+
+#glm_full_aero_aj <- glm.nb(TARGET ~  FixedAcidity+VolatileAcidity+CitricAcid+ResidualSugar+Chlorides+FreeSulfurDioxide+TotalSulfurDioxide+Density+pH+Sulphates+Alcohol+LabelAppeal+AcidIndex+STARS+log(LabelAppeal+3)+I(AcidIndex^2)+I(STARS^2), data = wine_training_data.zeros.train) 
+
+#fit.nb.nozeros_aj <-step(glm_full_aero_aj,direction='backward',data = wine_training_data.zeros.train, trace = FALSE)
+
+#residualPlots(fit.nb.nozeros_aj,layout = c(3, 4),ask=F)
+
+#summary(fit.nb.nozeros_aj)
+
+```
+
+#### 3.9.4 Evaluation of the model
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_nozero_2 <- 1 - fit.nb.nozeros$deviance / fit.nb.nozeros$null.deviance)
+
+# Log likelihood
+(logLik_nozero_2 <-logLik(fit.nb.nozeros))
+
+# AIC
+AIC_nozero_2 <- fit.nb.nozeros$aic
+BIC_nozero_2 <- BIC(fit.nb.nozeros)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_nozero_2<- cbind(wine_training_data.zeros.test, 
+      Mean = predict(fit.nb.nozeros, newdata=wine_training_data.zeros.test, type="response"), 
+      SE = predict(fit.nb.nozeros, newdata=wine_training_data.zeros.test, type="response", se.fit=T)$se.fit
+      )
+
+evl_df_nozero_2 <- as.data.frame(aggregate(ndf_nozero_2[, 17], list(ndf_nozero_2$TARGET), mean))
+evl_df_nozero_2 <- cbind(evl_df_nozero_2,aggregate(ndf_nozero_2[, 18], list(ndf_nozero_2$TARGET), mean)[,2])
+colnames(evl_df_nozero_2) <- c('TARGET','Mean','SE')
+evl_df_nozero_2
+```
+
+#### Evaluation of the zeroinflated model
+```{r}
+# goodness of fit: pseudo R squared
+zero.nozeroinf_null <- zeroinfl(TARGET ~ 1, data=wine_training_data.nozeros.train, dist="negbin")
+(pR2_nozero_2z <- 1- logLik(fit.nb.nozeros_zeroinf)[1]/logLik(zero.nozeroinf_null)[1])
+  
+# Log likelihood
+(logLik_nozero_2z<-logLik(fit.nb.nozeros_zeroinf))
+
+#dispersion
+c_nozero_2z <- deviance(fit.nb.nozeros_zeroinf)/fit.nb.nozeros_zeroinf$df.residual
+
+# AIC
+AIC_nozero_2z <- AIC(fit.nb.nozeros_zeroinf)
+BIC_nozero_2z <- BIC(fit.nb.nozeros_zeroinf)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_nozero_2z<- cbind(wine_training_data.nozeros.test, 
+      Count = predict(fit.nb.nozeros_zeroinf, newdata=wine_training_data.nozeros.test, type = "count"), 
+      Zero = predict(fit.nb.nozeros_zeroinf, newdata=wine_training_data.nozeros.test, type = "zero")
+      )
+
+evl_df_nozero_2z <- as.data.frame(aggregate(ndf_nozero_2z[, 17], list(ndf_nozero_2z$TARGET), mean))
+evl_df_nozero_2z <- cbind(evl_df_nozero_2z, aggregate(ndf_nozero_2z[, 18], list(ndf_nozero_2z$TARGET), mean)[,2])
+colnames(evl_df_nozero_2z) <- c('TARGET','Count','Zero')
+evl_df_nozero_2z
+```
+
+## 3.10 Multiple Linear Regression Model with SCORE: "Zeros-for-NAs" 
+
+#### 3.10.1 Build the initial Model 
+
+```{r name="MLR GLM ZEROS", message=FALSE, warning=FALSE, echo=T, eval=TRUE}
+fit.mlr.zeros <- step(lm(TARGET ~ ., data = wine_training_data.zeros.train), trace = FALSE)
+summary(fit.mlr.zeros)
+```
+
+#### 3.10.2 Interpretation
+```{r}
+coef <- summary(fit.mlr.zeros)$coefficients[,1]
+var.name <- variable.names(fit.mlr.zeros) 
+effects <- exp(coef)
+kable(round(interpretation <- cbind(coef,effects),2))
+```
+
+#### 3.10.3 Model diagnostics and adjustment
+
+```{r}
+#good-of-fitness test
+p_mlr_zero <- 1-pchisq(deviance(fit.mlr.zeros), fit.mlr.zeros$df.residual)
+cat("p-value:" ,p_poisson,"\n\n")
+
+#Check for over / underdispersion by looking at residual deviance/df or at a formal test statistic
+c_10<-deviance(fit.mlr.zeros)/fit.mlr.zeros$df.residual
+
+#c = 0 equidispersion, c > 0 is overdispersed
+
+#Check for zero inflation
+AIC(fit.mlr.zeros, fit.nb.zeros_zeroinf)
+
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.mlr.zeros))  #library(faraway)
+
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.mlr.zeros, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+```
+
+The GOF test indicates that the Poisson model fit the data (p > 0.05).
+
+```{r}
+# outlier test
+outlierTest(fit.mlr.zeros)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.mlr.zeros)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 2729, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.mlr.zeros_2729 <- update(fit.mlr.zeros,subset=c(-2729))
+compareCoefs(fit.mlr.zeros, fit.mlr.zeros_2729 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 2729 is not influential.
+
+
+```{r}
+#suppressMessages(suppressWarnings(library(car)))
+residualPlots(fit.mlr.zeros,layout = c(3, 4),ask=F)
+
+```
+
+
+#### 3.10.4 Evaluation of the model
+```{r}
+# goodness of fit: pseudo R squared
+(pR2_zero_3 <- 1- logLik(fit.mlr.zeros)[1]/logLik(fit.mlr.zeros)[1])
+
+# Log likelihood
+(logLik_zero_3 <-logLik(fit.mlr.zeros))
+
+# AIC
+AIC_zero_3 <- AIC(fit.mlr.zeros)
+BIC_zero_3 <- BIC(fit.mlr.zeros)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_zero_3<- cbind(wine_training_data.zeros.test, 
+      Mean = predict(fit.mlr.zeros, newdata=wine_training_data.zeros.test, type="response"), 
+      SE = predict(fit.mlr.zeros, newdata=wine_training_data.zeros.test, type="response", se.fit=T)$se.fit
+      )
+
+evl_df_zero_3 <- as.data.frame(aggregate(ndf_zero_3[, 17], list(ndf_zero_3$TARGET), mean))
+evl_df_zero_3 <- cbind(evl_df_zero_3,aggregate(ndf_zero_3[, 18], list(ndf_zero_3$TARGET), mean)[,2])
+colnames(evl_df_zero_3) <- c('TARGET','Mean','SE')
+evl_df_zero_3
+```
+
+
+
+## 3.11 Multiple Linear Regression Model with SCORE: "NAs Removed" 
+
+#### 3.11.1  Build the initial model
+
+```{r name="MLR GLM NO ZEROS", message=FALSE, warning=FALSE, echo=T, eval=TRUE}
+fit.mlr.nozeros <- step(lm(TARGET ~ ., data = wine_training_data.nozeros.train), trace = FALSE)
+summary(fit.mlr.nozeros)
+```
+
+#### 3.10.2 Interpretation
+```{r}
+coef <- summary(fit.mlr.nozeros)$coefficients[,1]
+var.name <- variable.names(fit.mlr.nozeros) 
+effects <- exp(coef)
+kable(round(interpretation <- cbind(coef,effects),2))
+```
+
+#### 3.11.3 Model diagnostics and adjustment
+
+```{r}
+#good-of-fitness test
+p_mlr_nozero <- 1-pchisq(deviance(fit.mlr.nozeros), fit.mlr.zeros$df.residual)
+cat("p-value:" ,p_nb_nozero,"\n\n")
+
+#Check for zero inflation
+AIC(fit.mlr.nozeros, fit.nb.zeros_zeroinf)
+
+#plot a half normal probability plot of residuals
+halfnorm(residuals(fit.mlr.nozeros))  #library(faraway)
+
+#Plot the scaled residuals vs. the (log) predicted values (or the linear predictor) 
+simulationOutput <- simulateResiduals(fittedModel = fit.mlr.nozeros, n = 250)  #library(DHARMa)
+plot(simulationOutput)
+
+```
+
+The GOF test indicates that the Poisson model fit the data (p =1 > 0.05).
+
+
+```{r}
+# outlier test
+outlierTest(fit.mlr.nozeros)
+
+```
+
+The results show that there is no outlier as judged by Bonferonni p.
+
+```{r}
+#Check for influential and leverage points
+influencePlot(fit.mlr.nozeros)
+```
+
+The above table shows some points with large studentized residuals, hat-values or Cook's distances from the influential plots. To test if the case, 369, which has the largest Cook's distances is influential, I remove it from the model and compare the coefficients.
+
+```{r}
+fit.mlr.nozeros_369 <- update(fit.mlr.nozeros,subset=c(-369))
+compareCoefs(fit.mlr.nozeros, fit.mlr.nozeros_369 )
+```
+
+From the output table, we can see that coefficients are changed minimally, and the observation 1630 is not influential.
+
+
+```{r}
+#suppressMessages(suppressWarnings(library(car)))
+residualPlots(fit.mlr.nozeros,layout = c(3, 4),ask=F)
+```
+
+#### 3.11.4 Evaluation of the model
+```{r}
+# goodness of fit: pseudo R squared
+fit.mlr.nozeros.null <- lm(TARGET ~ 1, data = wine_training_data.nozeros.train)
+(pR2_nozero_3 <- 1 - logLik(fit.mlr.nozeros)[1]/logLik(fit.mlr.nozeros.null)[1])
+
+# Log likelihood
+(logLik_nozero_3 <-logLik(fit.mlr.nozeros))
+
+# AIC
+AIC_nozero_3 <- AIC(fit.mlr.nozeros)
+BIC_nozero_3 <- BIC(fit.mlr.nozeros)
+
+#use the model to predict mean counts for each treatment and standard errors for each parameter.
+ndf_nozero_3<- cbind(wine_training_data.zeros.test, 
+      Mean = predict(fit.mlr.nozeros, newdata=wine_training_data.zeros.test, type="response"), 
+      SE = predict(fit.mlr.nozeros, newdata=wine_training_data.zeros.test, type="response", se.fit=T)$se.fit
+      )
+
+evl_df_nozero_3 <- as.data.frame(aggregate(ndf_nozero_3[, 17], list(ndf_nozero_3$TARGET), mean))
+evl_df_nozero_3 <- cbind(evl_df_nozero_3,aggregate(ndf_nozero_3[, 18], list(ndf_nozero_3$TARGET), mean)[,2])
+colnames(evl_df_nozero_3) <- c('TARGET','Mean','SE')
+evl_df_nozero_3
+```
+
+
+##4. SELECT MODELS (25 Points)
+
+**Specification:**
+
+Decide on the criteria for selecting the best count regression model. Will you select models with slightly worse performance if it makes more sense or is more parsimonious? Discuss why you selected your models.
+
+For the count regression model, will you use a metric such as AIC, average squared error, etc.? Be sure to explain how you can make inferences from the model, and discuss other relevant model output. If you like the multiple linear regression model the best, please say why. However, you must select a count regression model for model deployment. Using the training data set, evaluate the performance of the count regression model. Make predictions using the evaluation data set.
+
+####Summary of the models we built:
+
+model-1 fit.poisson.imp  fit.poisson.imp.aj   Poisson GLM: imputation
+model-2 fit.poisson.imp_zeroinf         Zero-inflated Poisson: imputation
+model-3 fit.qp.imp           Quasibinomial GLM: imputation
+model-4 fit.qp.imp_zeroinf              Zero-inflated Poisson: imputation (repeated)
+model-5 fit.nb.imp  fit.nb.imp.aj          Negative Binomial GLM:imputation
+model-6 fit.nb.imp_zeroinf              Zero-inflated Negative Binomial: imputation  
+model-7 fit.lm.imp  fit.lm.imp.aj        Multiple Linear Regression Model: imputation  
+mofrl-8 fit.ml.imp                     Multinomial Logistic Regression Model: imputation  
+model-9 fit.poisson.zeros fit.poisson.zeros_aj   Poisson GLM: NAs replaced by 0 
+model-10 fit.poisson.zeros_zeroinf     Zero-inflated Poisson: NAs replaced by 0 
+model-11 fit.poisson.nozeros           Poisson GLM: NAs Removed
+model-12 fit.poisson.nozeros_zeroinf   Zero-inflated Poisson: NAs Removed
+model-13 fit.nb.zeros                  Negative Binomial GLM: NAs replaced by 0 
+model-14 fit.nb.zeros_zeroinf          Zero-inflated Negative Binomial: NAs replaced by 0 
+model-15 fit.nb.nozeros                Negative Binomial GLM: NAs Removed
+model-16 fit.nb.nozeros_zeroinf        Zero-inflated Negative Binomial: NAs Removed
+model-17 fit.mlr.zeros                 Multiple Linear Regression: NAs replaced by 0 
+model-18 fit.mlr.nozeros               Multiple Linear Regression: NAs Removed
+
+
+#### Some Notes on the Models
+
+* Though the 5th and 6th models are not GLMs, and thus should be used with normal distributions, we need to remember that the TARGET variable did have a normal distribution before the ZEROS replaced the NAs.
+
+* There seem to be MORE significant fields in the "with zeros" model than in the "no zeros" model. Will this mean higher accuracy?
+
+#### The Output of these Models:
+
+```{r name="CALC_SD_and_SE", message=FALSE, warning=FALSE, echo=T}
+calc_sd <- function(fit, data){
+  prediction <- predict(fit, newdata=data, type='response')
+  difference <- (prediction - mean(data$TARGET))
+  difference_squared <- difference * difference
+  return (mean(sqrt(difference_squared)))
+}
+
+calc_se <- function(fit, data){
+  prediction <- predict(fit, newdata=data, type='response')
+  difference <- (prediction - data$TARGET)
+  difference_squared <- difference * difference
+  return (sqrt(mean(difference_squared)))
+}
+
+# Function that returns Root Mean Squared Error
+rmse <- function(error)
+{
+    sqrt(mean(error^2))
+}
+ 
+# Function that returns Mean Absolute Error
+mae <- function(error)
+{
+    mean(abs(error))
+}
+
+```
+
+```{r name="SD_SE_AIC_BIC", message=FALSE, warning=FALSE, echo=T, eval=TRUE}
+##################################################################
+# SD Calcs:
+##################################################################
+sd.poisson.imp.aj <- calc_sd(fit.poisson.imp.aj, test)
+sd.poisson.imp_zeroinf <- calc_sd(fit.poisson.imp_zeroinf, test)
+sd.fit.qp.imp <- calc_sd(fit.qp.imp, test)
+#sd.qp.imp_zeroinf <- calc_sd(fit.qp.imp_zeroinf, test)
+sd.nb.imp.aj <- calc_sd(fit.nb.imp.aj, test)
+sd.nb.imp_zeroinf <- calc_sd(fit.nb.imp_zeroinf, test)
+sd.lm.imp.aj <- calc_sd(fit.poisson.imp, test)
+sd.ml.imp <- calc_sd(fit.ml.imp, mldata)
+
+sd.poisson.nozeros <- calc_sd(fit.poisson.nozeros, wine_training_data.nozeros.test)
+sd.nb.nozeros <- calc_sd(fit.nb.nozeros, wine_training_data.nozeros.test)
+sd.mlr.nozeros <- calc_sd(fit.mlr.nozeros, wine_training_data.nozeros.test)
+
+sd.poisson.zeros <- calc_sd(fit.poisson.zeros, wine_training_data.zeros.test)
+sd.nb.zeros <- calc_sd(fit.nb.zeros, wine_training_data.zeros.test)
+sd.mlr.zeros <- calc_sd(fit.mlr.zeros, wine_training_data.zeros.test)
+
+sd.poisson.zeros_zeroinf <- calc_sd(fit.poisson.zeros_zeroinf, wine_training_data.zeros.test)
+sd.poisson.nozeros_zeroinf <- calc_sd(fit.poisson.nozeros_zeroinf, wine_training_data.zeros.test)
+sd.nb.zeros_zeroinf <- calc_sd(fit.nb.zeros_zeroinf , wine_training_data.zeros.test)
+sd.nb.nozeros_zeroinf <- calc_sd(fit.nb.nozeros_zeroinf, wine_training_data.zeros.test)
+
+sd.mlr.nozeros <- calc_sd(fit.mlr.nozeros, wine_training_data.zeros.test)
+
+SD <- format(c(sd.poisson.imp.aj,sd.poisson.imp_zeroinf,sd.fit.qp.imp,sd.nb.imp.aj,sd.nb.imp_zeroinf,sd.lm.imp.aj,sd.ml.imp,sd.poisson.zeros,sd.poisson.zeros_zeroinf,sd.poisson.nozeros,sd.poisson.nozeros_zeroinf,sd.nb.zeros,sd.nb.zeros_zeroinf,sd.nb.nozeros,sd.nb.nozeros_zeroinf,sd.mlr.zeros,sd.mlr.nozeros), digits=2, nsmall=2)
+
+##################################################################
+# RMSE Calcs:
+##################################################################
+rmse.poisson.imp.aj <- rmse(fit.poisson.imp.aj$residuals)
+rmse.poisson.imp_zeroinf <- rmse(fit.poisson.imp_zeroinf$residuals)
+rmse.fit.qp.imp <- rmse(fit.qp.imp$residuals)
+#rmse.qp.imp_zeroinf <- rmse(fit.qp.imp_zeroinf$residuals)
+rmse.nb.imp.aj <- rmse(fit.nb.imp.aj$residuals)
+rmse.nb.imp_zeroinf <- rmse(fit.nb.imp_zeroinf$residuals)
+rmse.lm.imp.aj <- rmse(fit.lm.imp$residuals)
+rmse.ml.imp <- rmse(fit.ml.imp$residuals)
+
+rmse.poisson.zeros <- rmse(fit.poisson.zeros_aj$residuals)
+rmse.poisson.zeros_zeroinf <- rmse(fit.poisson.zeros_zeroinf$residuals)
+rmse.poisson.nozeros <- rmse(fit.poisson.nozeros$residuals)
+rmse.poisson.nozeros_zeroinf <- rmse(fit.poisson.nozeros_zeroinf$residuals)
+rmse.nb.zeros <- rmse(fit.nb.zeros$residuals)
+rmse.nb.zeros_zeroinf <- rmse(fit.nb.zeros_zeroinf$residuals)
+rmse.nb.nozeros <- rmse(fit.nb.nozeros$residuals)
+rmse.nb.nozeros_zeroinf <- rmse(fit.nb.nozeros_zeroinf$residuals)
+rmse.mlr.zeros <- rmse(fit.mlr.zeros$residuals)
+rmse.mlr.nozeros <- rmse(fit.mlr.nozeros$residuals)
+
+RMSE <- format(c(rmse.poisson.imp.aj,rmse.poisson.imp_zeroinf ,rmse.fit.qp.imp,rmse.nb.imp.aj,rmse.nb.imp.aj,rmse.lm.imp.aj,rmse.ml.imp,                 rmse.poisson.zeros,rmse.poisson.zeros_zeroinf,rmse.poisson.nozeros,rmse.poisson.nozeros_zeroinf,rmse.nb.zeros,rmse.nb.zeros_zeroinf,rmse.nb.nozeros,rmse.nb.nozeros_zeroinf,rmse.mlr.zeros,rmse.mlr.nozeros), digits=2, nsmall=2)
+
+##################################################################
+# SE Calcs:
+##################################################################
+se.poisson.imp.aj <- calc_se(fit.poisson.imp.aj, test)
+se.poisson.imp_zeroinf <- calc_se(fit.poisson.imp_zeroinf, test)
+se.fit.qp.imp <- calc_se(fit.qp.imp, test)
+#se.qp.imp_zeroinf <- calc_se(fit.qp.imp_zeroinf, test)
+se.nb.imp.aj <- calc_se(fit.nb.imp.aj, test)
+se.nb.imp_zeroinf <- calc_se(fit.nb.imp_zeroinf, test)
+se.lm.imp.aj <- calc_se(fit.lm.imp, test)
+se.ml.imp <- calc_se(fit.ml.imp, mldata)
+
+se.poisson.nozeros <- calc_se(fit.poisson.nozeros, wine_training_data.nozeros.test)
+se.nb.nozeros <- calc_se(fit.nb.nozeros, wine_training_data.nozeros.test)
+se.mlr.nozeros <- calc_se(fit.mlr.nozeros, wine_training_data.nozeros.test)
+
+se.poisson.zeros <- calc_se(fit.poisson.zeros, wine_training_data.zeros.test)
+se.nb.zeros <- calc_se(fit.nb.zeros, wine_training_data.zeros.test)
+se.mlr.zeros <- calc_se(fit.mlr.zeros, wine_training_data.zeros.test)
+
+se.poisson.zeros_zeroinf <- calc_se(fit.poisson.zeros_zeroinf, wine_training_data.zeros.test)
+se.poisson.nozeros_zeroinf <- calc_se(fit.poisson.nozeros_zeroinf, wine_training_data.zeros.test)
+se.nb.zeros_zeroinf <- calc_se(fit.nb.zeros_zeroinf , wine_training_data.zeros.test)
+se.nb.nozeros_zeroinf <- calc_se(fit.nb.nozeros_zeroinf, wine_training_data.zeros.test)
+
+se.mlr.nozeros <- calc_se(fit.mlr.nozeros, wine_training_data.zeros.test)
+
+SE <- format(c(se.poisson.imp.aj,se.poisson.imp_zeroinf,se.fit.qp.imp,se.nb.imp.aj,se.nb.imp_zeroinf,se.lm.imp.aj,sd.ml.imp,se.poisson.zeros,se.poisson.zeros_zeroinf,se.poisson.nozeros,se.poisson.nozeros_zeroinf,se.nb.zeros,se.nb.zeros_zeroinf,se.nb.nozeros,se.nb.nozeros_zeroinf,se.mlr.zeros,se.mlr.nozeros), digits=2, nsmall=2)
+
+##################################################################
+# AIC Calcs:
+##################################################################
+AIC <- format(c(AIC_1,AIC_1z,AIC_2,AIC_3,AIC_3z,AIC_4,AIC_5,AIC_zero_1,AIC_zero_1z,AIC_nozero_1,AIC_nozero_1z,AIC_zero_2,AIC_zero_2z,AIC_nozero_2,AIC_nozero_2z,AIC_zero_3,AIC_nozero_3), digits=2, nsmall=2)
+
+##################################################################
+# BIC Calcs:
+##################################################################
+BIC <- format(c(BIC_1,BIC_1z,BIC_2,BIC_3,BIC_3z,BIC_4,BIC_5,BIC_zero_1,BIC_zero_1z,BIC_nozero_1,BIC_nozero_1z,BIC_zero_2,BIC_zero_2z,BIC_nozero_2,BIC_nozero_2z,BIC_zero_3,BIC_nozero_3), digits=2, nsmall=2)
+
+##################################################################
+# MDL Co-efficients:
+##################################################################
+#all_fits <- c(fit.poisson.nozeros,fit.nb.nozeros,fit.mlr.nozeros,fit.poisson.zeros,fit.nb.zeros,fit.mlr.zeros,fit.nb.zeroinfl)
+
+##################################################################
+# LogLik Calcs:
+##################################################################
+LogLik <- format(c(logLik_1,logLik_1z,logLik_2,logLik_3,logLik_3z,logLik_4,logLik_5,logLik_zero_1,logLik_zero_1z,logLik_nozero_1,logLik_nozero_1z,
+logLik_zero_2,logLik_zero_2z,logLik_nozero_2,logLik_nozero_2z,logLik_zero_3,logLik_nozero_3), digits=2, nsmall=2)
+
+##################################################################
+# R.squared Calcs:
+##################################################################
+R.squared <- format(round(c(pR2_1,pR2_1z,pR2_2,pR2_3,pR2_3z,pR2_4,pR2_5,pR2_zero_1,pR2_zero_1z,pR2_nozero_1,pR2_nozero_1z,pR2_zero_2,pR2_zero_2z,pR2_nozero_2,pR2_nozero_2z,pR2_zero_3,pR2_nozero_3),2))
+
+##################################################################
+# good-of-fitness:
+##################################################################
+GOF <- format(round(c(p_poisson_aj,NA,p_qp,p_nb_aj,NA,p_lm_aj ,NA,p_poisson_zero_aj,NA,p_poisson_nozero,NA,p_nb_zero_aj,NA,p_nb_nozero,NA,p_mlr_zero,p_mlr_nozero),4))
+
+##################################################################
+# Dispersion Test: 
+##################################################################
+DispersionTest <- format(c(c_1,NA,c_2,c_3,NA,c_4,NA,c_6,NA,c_7,NA,c_8,NA,c_9,NA,c_10,NA))
+
+```
+
+```{r name="MLR GLM NO ZEROS", message=FALSE, warning=FALSE, echo=T, eval=TRUE}
+Model <- c("Poisson imputation","Zero-inflated Poisson imputation","Quasibinomial imputation","Negative Binomial imputation","Zero-inflated Negative Binomial imputation","Multiple Linear imputation"," Multinomial Logistic imputation",
+           "Poisson w/ 0s", "Zero-inflated Poisson w/ 0s","Poisson no 0s", "Zero-inflated Poisson no 0s","Negative Binomial w/0s","Zero-inflated Negative Binomial w/0s","Negative Binomial no 0s",  "Zero-inflated Negative Binomial no 0s", "Multiple Linear Regression w/ 0s", "Multiple Linear Regression no 0s" )
+kable(model_summary<- cbind(Model, GOF,DispersionTest,R.squared ,RMSE, SE, SD, AIC, BIC, LogLik))
+
+
+```
+
+```{r}
+model_id <- format(c("M1", "M1Z","M2","M3","M3Z","M4","M5","M6","M6z","M7","M7z","M8","M8z","M9","M9z","M10","M11"))
+model_name<- format(c("Poisson GLM: imputation","Zero-inflated Poisson: imputation","Quasibinomial GLM: imputation","Negative Binomial GLM:imputation","Zero-inflated Negative Binomial: imputation","Multiple Linear Regression Model: imputation"," Multinomial Logistic Regression Model: imputation","Poisson GLM: NAs replaced by 0 ","Zero-inflated Poisson: NAs replaced by 0 ","Poisson GLM: NAs Removed","Zero-inflated Poisson: NAs Removed","Negative Binomial GLM: NAs replaced by 0 ","Zero-inflated Negative Binomial: NAs replaced by 0","Negative Binomial GLM: NAs Removed","Zero-inflated Negative Binomial: NAs Removed","Multiple Linear Regression: NAs replaced by 0","Multiple Linear Regression: NAs Removed"))
+
+kable(model_name <- cbind(model_id,model_name))
+
+```
+
+
+
+```{r}
+evl_df_combine <- cbind(evl_df_1,evl_df_1z[,c(2,3)],evl_df_2[,c(2,3)],evl_df_3[,c(2,3)],evl_df_3z[,c(2,3)],evl_df_4[,c(2,3)],evl_df_5[,2],evl_df_zero_1[,c(2,3)],evl_df_zero_1z[,c(2,3)],evl_df_nozero_1[,c(2,3)],evl_df_nozero_1z[,c(2,3)],evl_df_zero_2[,c(2,3)],evl_df_zero_2z[,c(2,3)],evl_df_nozero_2[,c(2,3)],evl_df_nozero_2z[,c(2,3)],evl_df_zero_3[,c(2,3)],evl_df_nozero_3[,c(2,3)])
+
+evl_df_combine <- cbind(seq(0,8),evl_df_combine)
+
+colnames(evl_df_combine)<-c("ID","TARGET","M1.Mean", "M1.SE","M1Z.Count", "M1Z.Zero","M2.Mean", "M2.SE","M3.Mean", "M3.SE","M3Z.Count","M3Z.Zero","M4.Mean", "M4.SE","M5.pred","M6.Mean","M6.SE","M6z.Count","M6z.Zero","M7.Mean","M7.SE","M7z.Count","M7z.Zero","M8.Mean","M8.SE","M8z.Count","M8z.Zero","M9.Mean","M9.SE","M9z.Count","M9z.Zero","M10.Mean","M10.SE","M11.Mean","M11.SE")
+
+
+kable(round(evl_df_combine,2),'html') %>% 
+  kable_styling(bootstrap_options = c('bordered','hover','condensed',full_width=F))
+
+# Generated palette with rich rainbow and dark (12, s = 0.6, v = 0.75)
+mixcolor <- c("#1B9E77", "#666666", "#5e1ea6", "#7570B3", "#A6761D", "#D95F02", "#E6AB02", "#E7298A",  "#000040", "#000093", "#0d4701", "#0076FF", "#0ff4ff",  "#49FB25",  "#FEEA02",  "#FF3300","#eeff24","#ff24ef")
+richcolor <- c("#000041", "#FF3300", "#0081FF",  "#80FE1A", "#FDEE02", "#FFAB00" )
+
+ggplot(evl_df_combine,aes(x=ID,y=TARGET))+
+  geom_line(aes(y = M1.Mean, colour = "Poisson-imputation"),size = 1)+
+  geom_line(aes(y = M1Z.Count, colour = "Zero-inflated Poisson-imputation"),size = 1)+
+  geom_line(aes(y = M2.Mean, colour = "Quasibinomial-imputation"),size = 1) + 
+  geom_line(aes(y = M3.Mean, colour = "Negative Binomial-imputation"),size = 1) + 
+  geom_line(aes(y = M3Z.Count, colour = "Zero-inflated Negative Binomial-imputation"),size = 1)+
+  geom_line(aes(y = M4.Mean, colour = "Multiple Linear-imputation"),size = 1) + 
+  geom_line(aes(y = M5.pred, colour = "Multinomial Logistic-imputation"),size = 1)+
+  
+  geom_line(aes(y = M6.Mean, colour = "Poisson w/ 0s"),size = 1) + 
+  geom_line(aes(y = M6z.Count, colour = "Zero-inflated Poisson w/ 0s"),size = 1) + 
+  geom_line(aes(y = M7.Mean, colour = "Poisson no 0s"),size = 1) + 
+  geom_line(aes(y = M7z.Count, colour = "Zero-inflated Poisson no 0s"),size = 1) + 
+  geom_line(aes(y = M8.Mean, colour = "Negative Binomial w/0s"),size = 1) + 
+  geom_line(aes(y = M8z.Count, colour = "Zero-inflated Negative Binomial w/0s"),size = 1) + 
+  geom_line(aes(y = M9.Mean, colour = "Negative Binomial no 0s"),size = 1) +
+  geom_line(aes(y = M9z.Count, colour = "Zero-inflated Negative Binomial no 0s"),size = 1) + 
+  geom_line(aes(y = M10.Mean, colour = "Multiple Linear Regression w/0s"),size = 1)+ 
+  geom_line(aes(y = M11.Mean, colour = "Multiple Linear Regression no 0s"),size = 1)+ 
+  
+  geom_bar(stat="identity",fill="orange",color="grey",alpha=0.2)+
+  theme_bw()+
+  scale_color_manual(values = mixcolor)
+
+
+ggplot(evl_df_combine,aes(x=ID,y=TARGET))+
+  geom_line(aes(y = M3.Mean, colour = "Negative Binomial-imputation"),size = 1.2) + 
+  geom_line(aes(y = M5.pred, colour = "Multinomial Logistic-imputation"),size = 1.2)+
+  geom_line(aes(y = M7.Mean, colour = "Poisson no 0s"),size = 1.2) + 
+  geom_line(aes(y = M8.Mean, colour = "Negative Binomial w/0s"),size = 1.2) + 
+  geom_line(aes(y = M9.Mean, colour = "Negative Binomial no 0s"),size = 1.5) +
+
+  
+  geom_bar(stat="identity",fill="green",color="grey",alpha=0.3)+
+  theme_bw()+
+  scale_color_manual(values = richcolor)
+
+```
+
+ 
+
+
+Before selecting a model, a quick explanation of why the "no ZEROs" models performed better:
+
+One might think that either removing or keeping a value (such as the "Perfect-Graphical-Fit" Zeros-for-NAs) would possibly ***improve*** a model's accuracy, but at least ***maintain*** it. In this case, however, we saw a relatively large drop in performance of the models due to the inclusion of this attribute.  Why would this be?
+
+One probable explanation is that true customers that actually ***BOUGHT*** the product took the time to fill their surveys out accurately.  Customers who didn't purchase the product (with less stake in the game and/or lack of knowledge of the product) simply did not contribute such useful data.  Due to this, the Zero-Inflated model is basically gone, and a linear model with a normal distribution again seems reasonable.
+
+We know that Poisson Regression is actually a special case of Negative Binomial Regression (where the mean and the variance are equal), but in this case, the Poisson Regression did not yield more accurate results. We know that if there is overdispersion in the Poisson, then the estimates from the Poisson regression model are consistent but inefficient.  It seems from our Box Plots in DATA Exploration that these overdispersions may have occurred.
+
+When comparing models fitted by maximum likelihood to the same data, the smaller the AIC or BIC, the better the fit.
+
+Based on this and the above results table, it seems that the ***Negative Binomial no 0s*** is our winner.
+
+
+```{r}
+###########################################################
+#Compare the pattern of missing valus
+###########################################################
+summary(wine_train)
+summary(wine_test)
+
+#Missingness Map
+miss_plot <- plot_missing(wine_train)
+miss_plot <- plot_missing(wine_test[,-2])
+
+wine_test$ResidualSugar[is.na(wine_test$ResidualSugar)] <- sample(wine_test$ResidualSugar[!is.na(wine_test$ResidualSugar)])
+wine_test$Chlorides[is.na(wine_test$Chlorides)] <- sample(wine_test$Chlorides[!is.na(wine_test$Chlorides)])
+wine_test$FreeSulfurDioxide[is.na(wine_test$FreeSulfurDioxide)] <- sample(wine_test$FreeSulfurDioxide[!is.na(wine_test$FreeSulfurDioxide)])
+wine_test$TotalSulfurDioxide[is.na(wine_test$TotalSulfurDioxide)] <- sample(wine_test$TotalSulfurDioxide[!is.na(wine_test$TotalSulfurDioxide)])
+wine_test$pH[is.na(wine_test$pH)] <- sample(wine_test$pH[!is.na(wine_test$pH)])
+wine_test$Sulphates[is.na(wine_test$Sulphates)] <- sample(wine_test$Sulphates[!is.na(wine_test$Sulphates)])
+wine_test$Alcohol[is.na(wine_test$Alcohol)] <- sample(wine_test$Alcohol[!is.na(wine_test$Alcohol)])
+
+wine_test$STARS[is.na(wine_test$STARS)] <- 0
+wine_test.zeros <- wine_test
+wine_test.nozeros <- wine_test[wine_test$STARS != 0,]
+
+#Missingness Map
+miss_plot <- plot_missing(wine_test[,-2])
+
+ pred_evalation <- predict(fit.nb.nozeros, newdata=wine_test, type="response")
+
+pred_evalation_df <- cbind(wine_test$IN, pred_evalation,wine_test[,-c(1,2)])
+colnames(pred_evalation_df)[colnames(pred_evalation_df)=='wine_test$IN']<- 'IN'
+
+#write.csv(pred_evalation_df,"predicted_evalation.csv")
+
+kable(head(pred_evalation_df,10))
+kable(head(pred_evalation_df,10),'html') %>% 
+  kable_styling(bootstrap_options = c('bordered','hover','condensed',full_width=F))
+```
+
