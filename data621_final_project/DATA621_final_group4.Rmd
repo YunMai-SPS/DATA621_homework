@@ -1,0 +1,694 @@
+---
+title: "DATA621 Final Project_Group4"
+author: "Yun Mai, Gurpreet Singh, Chirag Vithalani"
+date: "May 2, 2018"
+output: github_document
+---
+
+# Purpose
+
+The motion picture industry is growing at a rapid growth rate, likely due to the acceleration of online and mobile distribution, lower admission prices, and government policy initiatives. This industry is also rich in data, thus making it extremely exciting for statisticians. The movie industry, which used to rely on traditional conventional wisdom and simple rules of thumb to predict box office outcomes, is slowly seeking new "analytical" approaches.
+
+More and more analytical models will play a greater role in the motion picture industry by contributing towards superior marketing strategies that better predict the overall success of each movie.
+
+#Introduction
+
+# Data preparation
+```{r trainData }
+suppressMessages(suppressWarnings(library(data.table)))
+suppressMessages(suppressWarnings(library(knitr)))
+suppressMessages(suppressWarnings(library(stringr)))
+suppressMessages(suppressWarnings(library(pastecs)))
+suppressMessages(suppressWarnings(library(psych)))
+suppressMessages(suppressWarnings(library(Hmisc)))
+suppressMessages(suppressWarnings(library(reshape)))
+suppressMessages(suppressWarnings(library(corrplot)))
+suppressMessages(suppressMessages(library(MASS)))
+suppressMessages(suppressWarnings(library(dplyr)))
+suppressMessages(suppressWarnings(library(ggplot2)))
+suppressMessages(suppressWarnings(library(mice)))
+suppressMessages(suppressWarnings(library(VIM)))
+suppressMessages(suppressWarnings(library(caret)))
+
+suppressMessages(suppressWarnings(library(Amelia)))
+suppressMessages(suppressWarnings(library(car)))
+suppressMessages(suppressWarnings(library(Amelia)))
+
+
+suppressMessages(suppressWarnings(library(readr)))
+
+#options(stringsAsFactors = FALSE)
+#movie <- readr::read_csv('https://raw.githubusercontent.com/chirag-vithlani/Business_Analytics_and_Data_Mining_DATA_621/master/Movie_data_analysis_project/data/movie_metadata.csv', locale = locale(encoding = "UTF-8"))
+
+movie <- readr::read_csv('E:/YM_work/CUNY_DAMS/CUNY_621/DATA621_finalproject/movie_add_missing.csv', locale = locale(encoding = "UTF-8"))
+
+movie <- as.data.frame(movie)
+movie$Index <- seq(1,nrow(movie))
+movie <-movie[,c(length(movie),1:(length(movie)-1))]
+#readr::write_csv(movie, "E:/YM_work/CUNY_DAMS/CUNY_621/DATA621_finalproject/movie_original.csv")
+#temp <- movie <- readr::read_csv('E:/YM_work/CUNY_DAMS/CUNY_621/DATA621_finalproject/movie_original.csv', locale = locale(encoding = "UTF-8"))
+
+
+```
+
+## Data preparation for linear regression
+
+Clean up 
+```{r}
+# correct some incorrect aspect ratio 
+movie$aspect_ratio[which(movie$aspect_ratio == 16)] <- 1.78
+movie$aspect_ratio[which(movie$aspect_ratio == 4)] <- 1.33
+
+# fill empty cell with NA if any
+for(i in 1:length(movie)){
+ movie[,i][which(movie[,i]=="")]<-NA
+}
+
+#replace NAs as string 'NA' 
+for(i in 1:length(movie)){
+  if (class(movie[,i]) == 'character'){
+    movie[,i][which(is.na(movie[,i]))] <- 'NA'
+  }
+}
+
+#replace 'Not Rated' in content_rating with 'Unrated' as they are the same
+movie$'content_rating' <- str_replace_all(movie$'content_rating','Not Rated','Unrated')
+ 
+#unique(movie$'content_rating')
+```
+
+check the missing data in movie
+```{r,eval=F}
+pMiss <- function(x){(sum(is.null(x))+sum(is.na(x)))/length(x)[1]*100}
+pMiss_count <- function(x){sum(is.null(x))+sum(is.na(x))}
+missfeature_percent <- as.data.frame(apply(movie[,-1],2,pMiss))
+missfeature_count <- as.data.frame(apply(movie[,-1],2,pMiss_count))
+feature_mode <- unlist(t(lapply(movie[,-1],class)))
+miss_feature <- cbind(missfeature_count,feature_mode,missfeature_percent)
+miss_feature <- miss_feature[,c(2,1,3)]
+colnames(miss_feature) <- c('feature_mode','missing value','missing value(%)')
+miss_feature <- miss_feature[order(miss_feature$'missing value', decreasing =TRUE ),]
+miss_feature 
+
+```
+
+
+## separate the numeric and the categorical variables
+
+
+```{r}
+# Because of too many levels, variables "movie_title", "director_name","actor_1_name", "actor_2_name", "actor_3_name", "plot_keywords" and "movie_imdb_link" will not be used in the model.
+
+# separate the numeric and the categorical variables
+num_var <- dplyr::select_if(movie[,-1], is.numeric)
+
+ctg_var <- movie[,-which(names(movie) %in% names(num_var))][,-1]
+
+#temp <- movie
+
+#temp <- movie[,-which(names(movie) %in% c("director_name","actor_1_name", "actor_2_name", "actor_3_name", "plot_keywords" ,"movie_imdb_link"))]
+
+#for( i in 3: length(temp)){
+#  if(class(temp[,i])=='character'){
+#    temp[,i]<-as.factor(temp[,i])
+#  }
+#}
+
+```
+
+
+# impute the missing values
+
+```{r}
+#memory.limit()
+#memory.limit(size=20000)
+
+# impute 5 data sets for the missing values in the dataset
+impData <- mice(num_var, m=5, printFlag=FALSE, meth="sample", maxit=50,seed=500) 
+
+#compare the distributions of original and imputed data
+densityplot(impData)
+
+# get the completed dataset where the missing values have been replaced with the imputed values in the first of the five datasets
+movie_im <- complete(impData,1)
+movie_im <- cbind(movie$Index,movie_im)
+colnames(movie_im)[1] <- 'Index'
+
+#write.csv(movie_im,'impute.csv')
+
+#delete the imputeded Y
+not_na <- movie[!is.na(movie$gross),][,'Index']
+
+num_mid <- movie_im[which(movie_im[,'Index'] %in% not_na),] 
+
+```
+
+## remove rocords with NA in gross
+
+```{r}
+#remove NA from dicrector and actors columns
+ctg_var <- cbind(movie$Index,ctg_var)
+colnames(ctg_var)[1] <- 'Index'
+ctg_mid <- ctg_var[which(ctg_var[,'Index'] %in% not_na),] 
+
+movie_mid <- cbind(num_mid,ctg_mid[,-1])
+
+#anyNA(movie_mid) #[1] FALSE
+```
+
+## calculate the averger gross of each dicrector and actor made in the previous movies
+
+```{r}
+# the compuation will be based on the whole dataset
+# the records with missing gross values will be removed before calculation
+
+#"director_name","actor_1_name", "actor_2_name", "actor_3_name",
+
+####################################################
+#convert director_name to dummay variable
+####################################################
+dummy_director <- as.data.frame(model.matrix(~director_name-1, data = movie_mid))
+gross_director <- cbind(movie_mid[,'gross'],dummy_director)
+colnames(gross_director)[1] <- c('gross')
+director_sum <- as.matrix(unlist(lapply(dummy_director,sum)))
+gross_director <- as.matrix(t(as.matrix(gross_director$gross)) %*% as.matrix(gross_director[,-1]))
+director_ave_gross <- gross_director/t(director_sum)
+hist(director_ave_gross)
+#Aaron Schneider
+
+
+#director_sum <- lapply(dummy_director,sum)
+#for (i in 1:length(dummy_director)){
+#  dummy_director[,i] <- ifelse(dummy_director[i]==1,director_sum[[i]],0)
+#}
+
+####################################################
+#convert actor_1_name to dummay variable
+####################################################
+dummy_actor_1 <- as.data.frame(model.matrix(~actor_1_name-1, data = movie_mid))
+gross_actor_1 <- cbind(movie_mid[,'gross'],dummy_actor_1)
+colnames(gross_actor_1)[1] <- c('gross')
+actor_1_sum <- as.matrix(unlist(lapply(dummy_actor_1,sum)))
+gross_actor_1 <- as.matrix(t(as.matrix(gross_actor_1$gross)) %*% as.matrix(gross_actor_1[,-1]))
+actor_1_ave_gross <- gross_actor_1/t(actor_1_sum)
+hist(actor_1_ave_gross)
+
+####################################################
+#convert actor_2_name to dummay variable
+####################################################
+dummy_actor_2 <- as.data.frame(model.matrix(~actor_2_name-1, data = movie_mid))
+gross_actor_2 <- cbind(movie_mid[,'gross'],dummy_actor_2)
+colnames(gross_actor_2)[1] <- c('gross')
+actor_2_sum <- as.matrix(unlist(lapply(dummy_actor_2,sum)))
+gross_actor_2 <- as.matrix(t(as.matrix(gross_actor_2$gross)) %*% as.matrix(gross_actor_2[,-1]))
+actor_2_ave_gross <- gross_actor_2/t(actor_2_sum)
+hist(actor_2_ave_gross)
+
+####################################################
+#convert actor_3_name to dummay variable
+####################################################
+dummy_actor_3 <- as.data.frame(model.matrix(~actor_3_name-1, data = movie_mid))
+gross_actor_3 <- cbind(movie_mid[,'gross'],dummy_actor_3)
+colnames(gross_actor_3)[1] <- c('gross')
+actor_3_sum <- as.matrix(unlist(lapply(dummy_actor_3,sum)))
+gross_actor_3 <- as.matrix(t(as.matrix(gross_actor_3$gross)) %*% as.matrix(gross_actor_3[,-1]))
+actor_3_ave_gross <- gross_actor_3/t(actor_3_sum)
+hist(actor_3_ave_gross)
+
+colnames(director_ave_gross) <- str_replace_all(colnames(director_ave_gross),"director_name","")
+colnames(actor_1_ave_gross) <- str_replace_all(colnames(actor_1_ave_gross),"actor_1_name","")
+colnames(actor_2_ave_gross) <- str_replace_all(colnames(actor_2_ave_gross),"actor_2_name","")
+colnames(actor_3_ave_gross) <- str_replace_all(colnames(actor_3_ave_gross),"actor_3_name","")
+
+director_ave_gross <- as.data.frame(t(director_ave_gross))
+director_ave_gross$director <- rownames(director_ave_gross)
+
+actor_1_ave_gross <- as.data.frame(t(actor_1_ave_gross))
+actor_1_ave_gross$actor_1 <- rownames(actor_1_ave_gross)
+
+actor_2_ave_gross <- as.data.frame(t(actor_2_ave_gross))
+actor_2_ave_gross$actor_2 <- rownames(actor_2_ave_gross)
+
+actor_3_ave_gross <- as.data.frame(t(actor_3_ave_gross))
+actor_3_ave_gross$actor_3 <- rownames(actor_3_ave_gross)
+
+movie_mid$director_ave_gross <- unlist(lapply(movie_mid$director_name, function(x) director_ave_gross$V1[match(x, director_ave_gross$director)]))
+
+movie_mid$actor_1_ave_gross <- unlist(lapply(movie_mid$actor_1_name, function(x) actor_1_ave_gross$V1[match(x, actor_1_ave_gross$actor_1)]))
+
+movie_mid$actor_2_ave_gross <- unlist( lapply(movie_mid$actor_2_name, function(x) actor_2_ave_gross$V1[match(x, actor_2_ave_gross$actor_2)]))
+
+movie_mid$actor_3_ave_gross <- unlist( lapply(movie_mid$actor_3_name, function(x) actor_3_ave_gross$V1[match(x, actor_3_ave_gross$actor_3)]))
+
+
+anyNA(movie_mid)
+
+
+```
+
+
+## calculate how many movies of each dicrector and actor has been involved previously 
+
+```{r}
+rownames(director_sum) <- str_replace_all(rownames(director_sum),"director_name","")
+rownames(actor_1_sum) <- str_replace_all(rownames(actor_1_sum),"actor_1_name","")
+rownames(actor_2_sum) <- str_replace_all(rownames(actor_2_sum),"actor_2_name","")
+rownames(actor_3_sum) <- str_replace_all(rownames(actor_3_sum),"actor_3_name","")
+
+director_sum <- as.data.frame(director_sum)
+director_sum$director <- rownames(director_sum)
+
+actor_1_sum <- as.data.frame(actor_1_sum)
+actor_1_sum$actor_1 <- rownames(actor_1_sum)
+
+actor_2_sum <- as.data.frame(actor_2_sum)
+actor_2_sum$actor_2 <- rownames(actor_2_sum)
+
+actor_3_sum <- as.data.frame(actor_3_sum)
+actor_3_sum$actor_3 <- rownames(actor_3_sum)
+
+movie_mid$director_num <- unlist(lapply(movie_mid$director_name, function(x) director_sum$V1[match(x, director_sum$director)]))
+
+movie_mid$actor_1_num <- unlist(lapply(movie_mid$actor_1_name, function(x) actor_1_sum$V1[match(x, actor_1_sum$actor_1)]))
+
+movie_mid$actor_2_num <- unlist( lapply(movie_mid$actor_2_name, function(x) actor_2_sum$V1[match(x, actor_2_sum$actor_2)]))
+
+movie_mid$actor_3_num <- unlist( lapply(movie_mid$actor_3_name, function(x) actor_3_sum$V1[match(x, actor_3_sum$actor_3)]))
+
+
+anyNA(movie_mid)
+
+```
+
+## replace hyphen to lower score in 'genres' and 'content_rating'
+```{r}
+movie_mid$genres <- str_replace_all(movie_mid$genres,"-","_")
+movie_mid$content_rating <- str_replace_all(movie_mid$content_rating,"-","_")
+```
+
+###convert some categorical variables to factor
+```{r}
+movie_mid$content_rating <- as.factor(movie_mid$content_rating)
+movie_mid$color <- as.factor(movie_mid$color)
+movie_mid$language <- as.factor(movie_mid$language)
+movie_mid$country <- as.factor(movie_mid$language)
+movie_mid$genres <- as.factor(movie_mid$genres)
+movie_mid$aspect_ratio <- as.factor(movie_mid$aspect_ratio)
+
+```
+
+
+
+## split the data into train and evaluation datasets
+```{r}
+#movie$Index <- seq(1,nrow(movie))
+# <- movie[,c(29,1:28)]  
+
+# fill the empty cell with NA
+#movie [movie ==""] <- NA
+
+#split the data for trainning and evaluation:
+set.seed(123)
+indexes <- sample(1:nrow(movie_mid), size=0.2*nrow(movie_mid))
+ 
+# Split data into two part, train for building model and evaluation for 
+evaluation <- movie_mid[indexes,]
+train <- movie_mid[-indexes,]
+
+#train.rows <- createDataPartition(y=movie$Index, p=0.8, list = FALSE)   # caret package
+#train <- movie[train.rows,]  
+#evaluation <-movie[-train.rows,]  
+anyNA(train)
+
+```
+
+##multillinearity for dataset I
+
+```{r}
+suppressMessages(suppressWarnings(library(usdm)))
+
+vif_test <- vif(train[,-which(names(train) %in% c("Index","gross","aspect_ratio","movie_title" , "content_rating" , "color", "language" ,"country" , "director_name" , "actor_1_name" ,"actor_2_name" , "actor_3_name" , "genres" , "plot_keywords",  "movie_imdb_link"))])
+vif_test
+
+vif_final <- vif(train[,-which(names(train) %in% c("Index","aspect_ratio","gross","movie_title" , "content_rating" , "color", "language" ,"country" , "director_name" , "actor_1_name" ,"actor_2_name" , "actor_3_name" , "genres" , "plot_keywords",  "movie_imdb_link","cast_total_facebook_likes"))])
+vif_final
+```
+
+
+
+## dataset II - convert categorical variables to dummy variables
+
+convert "content_rating",  "color", "language",  "country","genres" to dummy variables
+
+```{r} 
+movie_mid_dummy <- movie_mid
+
+####################################################
+#convert genre to dummay variable
+####################################################
+genre <- paste(unique(movie_mid$genres),collapse=",")
+genre <- str_replace_all(genre,"\\|",",")
+genre <-as.list(strsplit(genre, ",")[[1]])
+genre <- str_replace_all(genre," ","")
+genre <- unique(genre)
+
+#set the last levle of genre "Film-Noir" as control
+for(i in 1: (length(genre)-1)){
+  movie_mid_dummy[,paste('genre.',genre[i],sep='')] <- ifelse(grepl(genre[i], movie_mid_dummy$genres),1,0)
+}
+
+
+####################################################
+#convert color to dummay variable
+####################################################
+color <- unique(movie_mid$color)
+
+#set the last levle "Black and White" as control
+movie_mid_dummy[,'color.Color'] <- ifelse(grepl('Color', movie_mid_dummy$color),1,0)
+
+
+####################################################
+#convert content rating (MMAP rating) to dummay variable
+####################################################
+#set the "NA" as control
+content_rating <- relevel(movie_mid_dummy$content_rating, "NA")
+dummy_mmap <- as.data.frame(model.matrix(~content_rating)[,-1])
+
+####################################################
+#convert language to dummay variable
+####################################################
+#set the "None" as control
+language <- relevel(movie_mid_dummy$language, "None")
+dummy_language <- as.data.frame(model.matrix(~language)[,-1])
+
+####################################################
+#convert country to dummay variable
+####################################################
+#set the "Zulu" as control
+country <- relevel(movie_mid_dummy$country, "Zulu")
+dummy_country <- as.data.frame(model.matrix(~country)[,-1])
+
+####################################################
+#convert aspect_ratio to dummay variable
+####################################################
+#set the "1.18" as control
+aspect <- relevel(movie_mid_dummy$aspect_ratio, "1.18")
+dummy_aspect_ratio <- as.data.frame(model.matrix(~aspect)[,-1])
+
+
+movie_mid_dummy <- cbind(movie_mid_dummy,dummy_mmap,dummy_language,dummy_country,dummy_aspect_ratio)
+
+# remove the variables converted to dummy
+# movie_mid_dummy <- movie_mid_dummy[,-which(names(movie_mid_dummy) %in% c("content_rating",  "color", "language",  "country","genres","director_name","actor_1_name","actor_2_name","actor_3_name"))]
+
+anyNA(movie_mid_dummy)
+
+```
+
+
+## split the data into train and evaluation datasets
+```{r}
+#movie$Index <- seq(1,nrow(movie))
+# <- movie[,c(29,1:28)]  
+
+# fill the empty cell with NA
+#movie [movie ==""] <- NA
+
+#split the data for trainning and evaluation:
+set.seed(123)
+indexes <- sample(1:nrow(movie_mid_dummy), size=0.2*nrow(movie_mid_dummy))
+ 
+# Split data into two part, train for building model and evaluation for 
+evaluation_dummy <- movie_mid_dummy[indexes,]
+train_dummy <- movie_mid_dummy[-indexes,]
+
+#train.rows <- createDataPartition(y=movie$Index, p=0.8, list = FALSE)   # caret package
+#train <- movie[train.rows,]  
+#evaluation <-movie[-train.rows,]  
+anyNA(train_dummy)
+
+```
+
+## Multiple Linear Regression I - based on dataset I
+
+```{r}
+train$content_rating<- relevel(train$content_rating, "NA")
+train$country <- relevel(train$country, "Zulu")
+train$language <- relevel(train$language, "Zulu")
+train$aspect_ratio<- relevel(train$aspect_ratio, "1.18")
+
+fit_lm_1 <- lm(gross~.,
+                  train[,-which(names(train) %in% c("Index", "movie_title","director_name" , "actor_1_name" ,"actor_2_name" , "actor_3_name" , "plot_keywords",  "movie_imdb_link","cast_total_facebook_likes"))])
+
+fit_lm_1.sum <- summary(fit_lm_1)
+
+
+data.frame(fit_lm_1.sum$coef[fit_lm_1.sum$coef[,4] <= .05, ])
+```
+
+### Pseudo R-squared, LogLikelihood, AIC
+
+```{r}
+lm_1_null <- lm(gross~1,
+                  train[,-which(names(train) %in% c("Index", "movie_title","director_name" , "actor_1_name" ,"actor_2_name" , "actor_3_name" , "plot_keywords",  "movie_imdb_link","cast_total_facebook_likes"))])
+
+# McFadden's pseudo-R^2
+(p_R2_1 <- 1 - deviance(fit_lm_1) / deviance(lm_1_null))
+
+# Log likelihood
+(logLik_1 <-logLik(fit_lm_1))
+
+#or
+#(pR2 <- 1- logLik(logitfit.1)/logLik(fit_lm_null))
+
+# AIC
+(AIC_1 <- AIC(fit_lm_1))
+
+
+```
+
+
+## Multiple Linear Regression II - based on dataset II
+
+### VIF test faild for the dummy dataset
+```{r,eval=F}
+suppressMessages(suppressWarnings(library(usdm)))
+
+vif(train_dummy[,-which(names(train_dummy) %in% c(names(ctg_mid),"gross"))])
+
+```
+
+
+
+```{r}
+fit_lm_2 <- lm(gross~.,
+                  train_dummy[,-which(names(train_dummy) %in% 
+                        c("Index","movie_title","plot_keywords","movie_imdb_link","content_rating",  "color", "language","country","genres","aspect_ratio","director_name","actor_1_name","actor_2_name","actor_3_name"))])
+
+
+fit_lm_2.sum <- summary(fit_lm_2)
+
+data.frame(fit_lm_2.sum$coef[fit_lm_2.sum$coef[,4] <= .05, ])
+
+```
+
+### Pseudo R-squared, LogLikelihood, AIC
+
+```{r}
+lm_2_null <- lm(gross~1,
+                  train_dummy[,-which(names(train_dummy) %in% 
+                        c("Index","movie_title","plot_keywords","movie_imdb_link","content_rating",  "color", "language","country","genres","aspect_ratio","director_name","actor_1_name","actor_2_name","actor_3_name"))])
+
+# McFadden's pseudo-R^2
+(p_R2_2 <- 1 - deviance(fit_lm_2) / deviance(lm_2_null))
+
+# Log likelihood
+(logLik_2 <-logLik(fit_lm_2))
+
+#or
+#(pR2 <- 1- logLik(logitfit.1)/logLik(fit_lm_null))
+
+# AIC
+(AIC_2 <- AIC(fit_lm_2))
+
+
+```
+
+## Ordinal Logistic Regression (OLR)
+
+###bin the dependent variable to 10 levels
+```{r}
+hist(movie_mid$gross)
+
+movie_bin<-movie_mid
+movie_bin$Performance <- factor(ifelse(movie_mid$gross > 5*10^8, "10", ifelse(movie_mid$gross > 3*10^8, "9", ifelse(movie_mid$gross > 1*10^8, "8",ifelse(movie_mid$gross > 0.5*10^8, "7",ifelse(movie_mid$gross > 0.25*10^8, "6",ifelse(movie_mid$gross > 0.125*10^8, "5",ifelse(movie_mid$gross > 0.625*10^7,"4",ifelse(movie_mid$gross > 0.3*10^7,"3",ifelse(movie_mid$gross > 0.1*10^7,"2","1"))))))))))
+
+#names(movie_mid_dummy)
+#dummy code genre
+movie_bin_2 <- movie_bin[,-which(names(movie_bin)%in% c('genres',"aspect_ratio","content_rating"))]
+movie_bin_2 <- cbind(movie_bin,movie_mid_dummy[,c(38:60)])
+movie_bin_2 <- cbind(movie_bin_2,movie_mid_dummy[,c(62:74)])
+movie_bin_2 <- cbind(movie_bin_2,movie_mid_dummy[,c(157:173)])
+
+sta_buket<- data.frame(table(movie_bin$Performance))
+colnames(sta_buket)[1] <- 'Levels'
+sta_buket[c(1,3:10,2),]
+
+anyNA(movie_bin_2)
+```
+
+##split the data
+```{r}
+####################################################
+# movie_bin
+####################################################
+
+#split the data for trainning and evaluation:
+set.seed(125)
+indexes <- sample(1:nrow(movie_bin), size=0.2*nrow(movie_bin))
+ 
+# Split data into two part, train for building model and evaluation for 
+evaluation_bin <- movie_bin[indexes,]
+train_bin <- movie_bin[-indexes,]
+
+#train.rows <- createDataPartition(y=movie$Index, p=0.8, list = FALSE)   # caret package
+#train <- movie[train.rows,]  
+#evaluation <-movie[-train.rows,]  
+anyNA(train_bin)
+
+####################################################
+# movie_bin_2
+####################################################
+
+set.seed(125)
+indexes <- sample(1:nrow(movie_bin), size=0.2*nrow(movie_bin))
+ 
+# Split data into two part, train for building model and evaluation for 
+evaluation_bin_2 <- movie_bin_2[indexes,]
+train_bin_2 <- movie_bin_2[-indexes,]
+
+#train.rows <- createDataPartition(y=movie$Index, p=0.8, list = FALSE)   # caret package
+#train <- movie[train.rows,]  
+#evaluation <-movie[-train.rows,]  
+anyNA(train_bin_2)
+
+```
+
+```{r}
+
+library(VGAM)
+## Without proportional odds assumptions
+train_bin_2$Performance <- ordered(train_bin_2$Performance)
+evaluation_bin_2$Performance <- ordered(evaluation_bin_2$Performance)
+
+dif <- setdiff(names(train_bin_2) , strsplit("num_voted_users+num_user_for_reviews+num_critic_for_reviews+imdb_score+facenumber_in_poster+budget+title_year+director_facebook_likes+actor_1_facebook_likes+actor_2_facebook_likes+actor_3_facebook_likes+cast_total_facebook_likes+movie_facebook_likes+director_ave_gross+actor_1_ave_gross+actor_2_ave_gross+actor_3_ave_gross+director_num+actor_1_num+actor_2_num+actor_3_num+genre.Action+genre.Adventure+genre.Fantasy+genre.Sci_Fi+genre.Thriller+genre.Romance+genre.Animation+genre.Comedy+genre.Family+genre.Musical+genre.Mystery+genre.Western+genre.Drama+genre.History+genre.Sport+genre.Crime+genre.Horror+genre.War+genre.Biography+genre.Music+genre.Documentary+aspect1.33+aspect1.37+aspect1.44+aspect1.5+aspect1.66+aspect1.85+aspect2+aspect2.2+aspect2.35+aspect2.76+content_ratingApproved+content_ratingG+content_ratingM+content_ratingNC_17+content_ratingPG+content_ratingPG_13+content_ratingR+content_ratingX, train_bin_2","\\+")[[1]])
+dif <- dif[-which(dif %in% c('Performance'))]
+
+sub_ml <-train_bin_2[,-which(names(train_bin_2) %in% c(dif))]
+sub_eva_ml <-train_bin_2[,-which(names(evaluation_bin_2) %in%c(dif))]
+
+#sub_eva_ml <-train_bin_2[,-which(names(evaluation_bin_2) %in% c("Index","duration","genre.News","genre.Short", "aspect_ratio" , "gross","movie_title","content_rating" ,"language","director_name", "actor_1_name","actor_2_name" , "actor_3_name","genres","plot_keywords" , "movie_imdb_link" , "content_ratingTV_MA", "content_ratingUnrated", "content_ratingTV_PG","content_ratingGP","content_ratingPassed","aspect1.75","aspect1.77","aspect1.78","aspect2.24","aspect2.39","aspect2.4","aspect2.55"))]
+
+
+## With nonproportional odds assumptions
+fit_vglm <-
+ vglm(Performance ~  ., sub_ml, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
+
+
+#sub_ml <-train_bin_2[,-which(names(train_bin_2) %in% c("Index","gross","movie_title", "plot_keywords" , "movie_imdb_link","director_name", "actor_1_name", "actor_2_name", "actor_3_name", "language", "country", "genres","content_rating","aspect_ratio",  "genre.Sci-Fi" ,"genre.News","genre.Short","num_critic_for_reviews","num_voted_users","imdb_score","facenumber_in_poster","duration","title_year","content_ratingM","content_ratingGP","content_ratingNC-17","content_ratingNot Rated","content_ratingPassed","content_ratingPG-13","content_ratingTV-MA","content_ratingTV-PG","content_ratingX","aspect1.75","aspect1.77","aspect1.78","aspect2.24","aspect2.39","aspect2.4","aspect2.55" ))]
+
+## With nonproportional odds assumptions
+#fit_vglm <- vglm(Performance ~  ., sub_ml, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
+
+#xfit_vglm <- vglm(Performance ~  num_user_for_reviews+budget+director_facebook_likes+actor_1_facebook_likes+actor_2_facebook_likes+actor_3_facebook_likes+cast_total_facebook_likes+movie_facebook_likes+color+director_ave_gross+actor_1_ave_gross+actor_2_ave_gross+actor_3_ave_gross+director_num+actor_1_num+actor_2_num+actor_3_num+genre.Action+genre.Adventure+genre.Fantasy+genre.Thriller+genre.Romance+genre.Animation+genre.Comedy+genre.Family+genre.Musical+genre.Mystery+genre.Western+genre.Drama+genre.History+genre.Sport+genre.Crime+genre.Horror+genre.War+genre.Biography+genre.Music+genre.Documentary+content_ratingApproved+content_ratingG+content_ratingPG+content_ratingR+aspect1.33+aspect1.37+aspect1.44+aspect1.5+aspect1.66+aspect1.85+aspect2+aspect2.2+aspect2.35+aspect2.76, sub_ml, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
+
+
+#fit_vglm <- vglm(Performance ~  num_voted_users+budget+title_year+director_facebook_likes+actor_1_facebook_likes+actor_2_facebook_likes+actor_3_facebook_likes+cast_total_facebook_likes+movie_facebook_likes+color+director_ave_gross+actor_1_ave_gross+actor_2_ave_gross+actor_3_ave_gross+director_num+actor_1_num+actor_2_num+actor_3_num+genre.Action+genre.Adventure+genre.Fantasy+genre.Sci_Fi+genre.Thriller+genre.Romance+genre.Animation+genre.Comedy+genre.Family+genre.Musical+genre.Mystery+genre.Western+genre.Drama+genre.History+genre.Sport+genre.Crime+genre.Horror+genre.War+genre.Biography+genre.Music+genre.Documentary+genre.News+genre.Short+content_ratingApproved+content_ratingG+content_ratingGP+content_ratingM+content_ratingNC_17+content_ratingPassed+content_ratingPG+content_ratingPG_13+content_ratingR+content_ratingTV_MA+content_ratingTV_PG+content_ratingUnrated+content_ratingX+aspect1.33+aspect1.37+aspect1.44+aspect1.5+aspect1.66+aspect1.75+aspect1.77+aspect1.78+aspect1.85+aspect2+aspect2.2+aspect2.24+aspect2.35+aspect2.39+aspect2.4+aspect2.55+aspect2.76, train_bin_2, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
+
+
+#fit_vglm <- vglm(Performance ~ num_voted_users+num_user_for_reviews+num_critic_for_reviews+imdb_score+facenumber_in_poster+budget+title_year+director_facebook_likes+actor_1_facebook_likes+actor_2_facebook_likes+actor_3_facebook_likes+cast_total_facebook_likes+movie_facebook_likes+director_ave_gross+actor_1_ave_gross+actor_2_ave_gross+actor_3_ave_gross+director_num+actor_1_num+actor_2_num+actor_3_num+genre.Action+genre.Adventure+genre.Fantasy+genre.Sci_Fi+genre.Thriller+genre.Romance+genre.Animation+genre.Comedy+genre.Family+genre.Musical+genre.Mystery+genre.Western+genre.Drama+genre.History+genre.Sport+genre.Crime+genre.Horror+genre.War+genre.Biography+genre.Music+genre.Documentary+aspect1.33+aspect1.37+aspect1.44+aspect1.5+aspect1.66+aspect1.85+aspect2+aspect2.2+aspect2.35+aspect2.76+content_ratingApproved+content_ratingG+content_ratingM+content_ratingNC_17+content_ratingPG+content_ratingPG_13+content_ratingR+content_ratingX, train_bin_2, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
+
+
+
+
+```
+
+
+### Pseudo R-squared, LogLikelihood, AIC
+
+```{r}
+vglm_null <- vglm(Performance ~  1, sub_ml, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
+
+# Log likelihood
+logLik.vglm <- function(x) -x@criterion$deviance/2
+logLik_3 <- logLik.vglm(fit_vglm)
+logLik_3_null <- logLik.vglm(vglm_null)
+
+# McFadden's pseudo-R^2
+(p_R2_3 <- 1 - deviance(fit_vglm) / deviance(vglm_null))
+#or
+p_R2_3 <- 1- logLik_3/logLik_3_null
+
+
+
+```
+
+###predict the gross in test data
+
+```{r}
+
+pred_3 <- predictvglm(fit_vglm, newdata = sub_eva_ml[,-which(names(sub_eva_ml) %in% 
+                                                               c("Performance"))],
+            type = "response",
+            se.fit = FALSE, deriv = 0, dispersion = NULL,
+            untransform = FALSE,
+            type.fitted = NULL, percentiles = NULL)
+
+clsdf_3 <- data.frame(cbind('Index'=train_bin_2$Index,'Pred.prob'=apply(pred_3,1,max),'Pred'=colnames(pred_3)[max.col(pred_3,ties.method="first")], sub_eva_ml$Performance))
+colnames(clsdf_3)[4]<-'Performance'
+
+
+
+suppressMessages(suppressWarnings(library(caret)))
+cfmx_3 <- confusionMatrix(data = clsdf_3$Pred, reference = clsdf_3$Performance, positive = "1")
+
+cfmx_3
+
+(kappa_3 <- cfmx_3$overall['Kappa'])
+(acrcy_3 <- cfmx_3$overall['Accuracy'])
+(err_rate_3 <- 1-cfmx_3$overall['Accuracy'])
+
+
+```
+
+
+```{r}
+
+library(randomForest)
+
+set.seed(100)
+
+fit_rf <- randomForest(Performance ~ . , data = train_bin_2[,-which(names(train_bin_2)%in%c("Index","aspect_ratio", "movie_title","content_rating"  , "language" ,"country" , "director_name","actor_1_name", "actor_2_name","actor_3_name",      "genres" , "plot_keywords" , "movie_imdb_link"))] , importance=TRUE, ntree=2000)
+
+varImpPlot(fit_rf)
+```
+
+```{r}
+
+pred_4 <- predict(fit_rf,evaluation_bin_2[,-which(names(train_bin_2)%in%c("Performance","Index","aspect_ratio", "movie_title","content_rating"  , "language" ,"country" , "director_name","actor_1_name", "actor_2_name","actor_3_name",      "genres" , "plot_keywords" , "movie_imdb_link"))] , type="response", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+
+clsdf_4 <- data.frame(cbind('Index'=train_bin_2$Index,'Pred'=pred_4, sub_eva_ml$Performance))
+colnames(clsdf_4)[3]<-'Performance'
+
+cfmx_4 <- confusionMatrix(data = clsdf_4$Pred, reference = clsdf_4$Performance, positive = "1")
+
+cfmx_4
+
+(kappa_4 <- cfmx_4$overall['Kappa'])
+(acrcy_4 <- cfmx_4$overall['Accuracy'])
+(err_rate_4 <- 1-cfmx_4$overall['Accuracy'])
+
+
+```
+
+
