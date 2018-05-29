@@ -26,6 +26,7 @@ suppressMessages(suppressWarnings(library(corrplot)))
 suppressMessages(suppressMessages(library(MASS)))
 suppressMessages(suppressWarnings(library(dplyr)))
 suppressMessages(suppressWarnings(library(ggplot2)))
+suppressMessages(suppressWarnings(library(ggthemes)))
 suppressMessages(suppressWarnings(library(mice)))
 suppressMessages(suppressWarnings(library(VIM)))
 suppressMessages(suppressWarnings(library(caret)))
@@ -77,8 +78,8 @@ movie$'content_rating' <- str_replace_all(movie$'content_rating','Not Rated','Un
 #unique(movie$'content_rating')
 ```
 
-check the missing data in movie
-```{r,eval=F}
+###check the missing data in movie
+```{r}
 pMiss <- function(x){(sum(is.null(x))+sum(is.na(x)))/length(x)[1]*100}
 pMiss_count <- function(x){sum(is.null(x))+sum(is.na(x))}
 missfeature_percent <- as.data.frame(apply(movie[,-1],2,pMiss))
@@ -90,8 +91,22 @@ colnames(miss_feature) <- c('feature_mode','missing value','missing value(%)')
 miss_feature <- miss_feature[order(miss_feature$'missing value', decreasing =TRUE ),]
 miss_feature 
 
+miss_record <- data.frame(cbind(movie[,1],apply(movie,1,pMiss)))
+colnames(miss_record )<-c('Index','missing value(%)')
+nrow(miss_record[miss_record[,2]!=0,])
+nrow(miss_record[miss_record[,2]>5,])
+
+cat('There are', nrow(miss_record[miss_record[,2]!=0,]),'records have missing values.')
+cat("\n\n")
+
+cat('There are', nrow(miss_record[miss_record[,2]>5,]),' records missed more than 5% data points.')
+cat("\n\n")
+
 ```
 
+```{r}
+missmap(movie, main = "Missing values vs observed")
+```
 
 ## separate the numeric and the categorical variables
 
@@ -117,7 +132,23 @@ ctg_var <- movie[,-which(names(movie) %in% names(num_var))][,-1]
 ```
 
 
-# impute the missing values
+##Visualization of the dependent variable
+
+```{r}
+ggplot(movie[!is.na(movie$gross),], aes(x = gross,fill = cut(gross, 100))) +
+  geom_histogram(show.legend = FALSE,cex.lab = 1.8,cex.axis = 1.5) + 
+  theme_few(base_size = 20)
+         
+
+```
+
+```{r}
+scatterplot(x=movie$title_year,y=movie$imdb_score)
+scatterplot(x=movie$title_year,y=log(movie$gross),cex.lab = 1.8,cex.axis = 1.5) 
+
+```
+
+##imputation
 
 ```{r}
 #memory.limit()
@@ -143,7 +174,7 @@ num_mid <- movie_im[which(movie_im[,'Index'] %in% not_na),]
 
 ```
 
-## remove rocords with NA in gross
+## remove records with NA in gross. completed dataset 'movie_mid' is genreated.
 
 ```{r}
 #remove NA from dicrector and actors columns
@@ -155,6 +186,9 @@ movie_mid <- cbind(num_mid,ctg_mid[,-1])
 
 #anyNA(movie_mid) #[1] FALSE
 ```
+
+
+
 
 ## calculate the averger gross of each dicrector and actor made in the previous movies
 
@@ -215,6 +249,12 @@ gross_actor_3 <- as.matrix(t(as.matrix(gross_actor_3$gross)) %*% as.matrix(gross
 actor_3_ave_gross <- gross_actor_3/t(actor_3_sum)
 hist(actor_3_ave_gross)
 
+par(mfrow=c(2,2))
+hist(director_ave_gross)
+hist(actor_1_ave_gross)
+hist(actor_1_ave_gross)
+hist(actor_1_ave_gross)
+
 colnames(director_ave_gross) <- str_replace_all(colnames(director_ave_gross),"director_name","")
 colnames(actor_1_ave_gross) <- str_replace_all(colnames(actor_1_ave_gross),"actor_1_name","")
 colnames(actor_2_ave_gross) <- str_replace_all(colnames(actor_2_ave_gross),"actor_2_name","")
@@ -239,7 +279,6 @@ movie_mid$actor_1_ave_gross <- unlist(lapply(movie_mid$actor_1_name, function(x)
 movie_mid$actor_2_ave_gross <- unlist( lapply(movie_mid$actor_2_name, function(x) actor_2_ave_gross$V1[match(x, actor_2_ave_gross$actor_2)]))
 
 movie_mid$actor_3_ave_gross <- unlist( lapply(movie_mid$actor_3_name, function(x) actor_3_ave_gross$V1[match(x, actor_3_ave_gross$actor_3)]))
-
 
 anyNA(movie_mid)
 
@@ -280,7 +319,7 @@ anyNA(movie_mid)
 
 ```
 
-## replace hyphen to lower score in 'genres' and 'content_rating'
+## replace hyphen to underscore in 'genres' and 'content_rating'
 ```{r}
 movie_mid$genres <- str_replace_all(movie_mid$genres,"-","_")
 movie_mid$content_rating <- str_replace_all(movie_mid$content_rating,"-","_")
@@ -297,6 +336,111 @@ movie_mid$aspect_ratio <- as.factor(movie_mid$aspect_ratio)
 
 ```
 
+
+## explore the correlation 
+
+### early blind guess
+```{r}
+#qplot(x=log(budget), y = log(gross), data=movie) +
+  #geom_smooth(method = "glm", formula = y~x, family = gaussian(link = 'log'))
+
+#qplot(x=log(imdb_score), y = log(gross), data=movie) +
+  #geom_smooth(method = "glm", formula = y~x, family = gaussian(link = 'log'))
+
+#qplot(x=log(director_facebook_likes), y = log(gross), data=movie) +
+  #geom_smooth(method = "glm", formula = y~x, family = gaussian(link = 'log'))
+
+#qplot(x=log(actor_1_facebook_likes), y = log(gross), data=movie) +
+  #geom_smooth(method = "glm", formula = y~x, family = gaussian(link = 'log'))
+
+
+ggplot(movie, aes(x = log(budget), y = log(gross))) + geom_point() +
+    stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+    stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_grey(base_size = 16.5)
+
+ggplot(movie, aes(x = imdb_score, y = log(gross))) + geom_point() +
+    stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+    stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_grey(base_size = 16.5)
+
+ggplot(movie, aes(x = log(director_facebook_likes), y = log(gross))) + geom_point() +
+    stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+    stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_grey(base_size = 16.5)
+
+ggplot(movie, aes(x = log(actor_1_facebook_likes), y = log(gross))) + geom_point() +
+    stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+    stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_grey(base_size = 16.5)
+
+
+```
+
+### correlation matrix
+
+```{r}
+
+pairs.panels( movie_mid[,c(2:6,9)], pch=21,lm=TRUE,cex.lab = 1.8,cex.axis = 1.5,cex.sub=1.3)
+pairs.panels( movie_mid[,c(7:8,10:12,9)], pch=21,lm=TRUE,cex.lab = 1.8,cex.axis = 1.5,cex.sub=1.3)
+pairs.panels( movie_mid[,c(13:17,9)], pch=21,lm=TRUE,cex.lab = 1.8,cex.axis = 1.5,cex.sub=1.3)
+pairs.panels( movie_mid[,c(18:22,9)], pch=21,lm=TRUE,cex.lab = 1.8,cex.axis = 1.5,cex.sub=1.3)
+pairs.panels( movie_mid[,c(23:27,9)], pch=21,lm=TRUE,cex.lab = 1.8,cex.axis = 1.5,cex.sub=1.3)
+pairs.panels( movie_mid[,c(28:32,9)], pch=21,lm=TRUE,cex.lab = 1.8,cex.axis = 1.5,cex.sub=1.3)
+pairs.panels( movie_mid[,c(33:37,9)], pch=21,lm=TRUE,cex.lab = 1.8,cex.axis = 1.5,cex.sub=1.3)
+
+#pairs.panels( movie_mid[,-1], pch=21,lm=TRUE,cex.lab = 1.8,cex.axis = 1.5,cex.sub=1.3)
+
+```
+
+##  correlation between the possible predictors
+
+Num_user_for_reviews, Num_voted_users, Director_ave_gross, Actor_1_ave_gross,Actor_2_ave_gross, Actor_3_ave_gross has a moderate or strong positive correlation with gross. 
+ 
+
+```{r}
+ggplot(movie_mid, aes(x = log(num_user_for_reviews), y = log(gross))) + geom_point() +
+    stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+    stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_few(base_size = 27)
+
+ggplot(movie_mid, aes(x = log(num_voted_users), y = log(gross))) + geom_point() +
+    stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+    stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_few(base_size = 27)
+
+ggplot(movie_mid, aes(x = log(director_ave_gross), y = log(gross))) + geom_point() +
+    stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+    stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_few(base_size = 27)
+
+ggplot(movie_mid, aes(x = log(actor_1_ave_gross), y = log(gross))) + geom_point() +
+    stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+    stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_few(base_size = 27)
+
+ggplot(movie_mid, aes(x = log(actor_2_ave_gross), y = log(gross))) + geom_point() +
+    stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+    stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_few(base_size = 27)
+
+ggplot(movie_mid, aes(x = log(actor_3_ave_gross), y = log(gross))) + geom_point() +
+    stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+    stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+    stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_few(base_size = 27)
+
+
+```
 
 
 ## split the data into train and evaluation datasets
@@ -431,6 +575,8 @@ anyNA(train_dummy)
 
 ## Multiple Linear Regression I - based on dataset I
 
+cast_total_facebook_likes will not be used.
+
 ```{r}
 train$content_rating<- relevel(train$content_rating, "NA")
 train$country <- relevel(train$country, "Zulu")
@@ -444,7 +590,45 @@ fit_lm_1.sum <- summary(fit_lm_1)
 
 
 data.frame(fit_lm_1.sum$coef[fit_lm_1.sum$coef[,4] <= .05, ])
+
 ```
+
+
+
+### outlier test
+```{r}
+outlierTest(fit_lm_1)
+influencePlot(fit_lm_1,col='red',id.n=2)
+```
+
+### update the model by removing the outliers and influential points
+```{r}
+fit_lm_1_mdf <- update(fit_lm_1,subset=c(-1-1231-30-52-1395-365-437-4-198-562-176))
+#compareCoefs(fit_lm_1, fit_lm_1_mdf)
+```
+
+```{r}
+fit_lm_1_mdf.sum <- summary(fit_lm_1_mdf)
+data.frame(fit_lm_1_mdf.sum$coef[fit_lm_1_mdf.sum$coef[,4] <= .05, ])
+```
+
+## check multillinearity for model I
+
+```{r}
+# extract the variable with significant coefficient
+library(broom)
+lm_model_coefficients <- tidy(fit_lm_1)
+lm_model_coefficients[lm_model_coefficients$p.value<0.05,1]
+
+```
+
+```{r}
+suppressMessages(suppressWarnings(library(usdm)))
+
+vif(train[,which(names(train) %in%c("num_voted_users", "aspect_ratio1.5" ,"aspect_ratio2", "budget", "director_facebook_likes","actor_1_facebook_likes", "actor_3_facebook_likes","content_ratingR", "color","genres", "director_ave_gross","actor_1_ave_gross", "actor_2_ave_gross", "actor_3_ave_gross","actor_1_num"   ))])
+
+```
+
 
 ### Pseudo R-squared, LogLikelihood, AIC
 
@@ -453,17 +637,47 @@ lm_1_null <- lm(gross~1,
                   train[,-which(names(train) %in% c("Index", "movie_title","director_name" , "actor_1_name" ,"actor_2_name" , "actor_3_name" , "plot_keywords",  "movie_imdb_link","cast_total_facebook_likes"))])
 
 # McFadden's pseudo-R^2
-(p_R2_1 <- 1 - deviance(fit_lm_1) / deviance(lm_1_null))
+(p_R2_1 <- 1 - deviance(fit_lm_1_mdf) / deviance(lm_1_null))
 
 # Log likelihood
-(logLik_1 <-logLik(fit_lm_1))
+(logLik_1 <-logLik(fit_lm_1_mdf))
 
 #or
 #(pR2 <- 1- logLik(logitfit.1)/logLik(fit_lm_null))
 
 # AIC
-(AIC_1 <- AIC(fit_lm_1))
+(AIC_1 <- AIC(fit_lm_1_mdf))
 
+
+```
+
+### prediction
+```{r}
+id <- which(!(evaluation$aspect_ratio %in% levels(train$aspect_ratio)))
+evaluation$aspect_ratio[id] <- NA
+#pred_1 <- predict(fit_lm_1_mdf,newdata=evaluation[,-which(names(train) %in% c("Index", "movie_title","director_name" , "actor_1_name" ,"actor_2_name" , "actor_3_name" , "plot_keywords",  "movie_imdb_link","cast_total_facebook_likes"))] )
+
+evaluation.new <- evaluation
+evaluation.new[which(evaluation.new$aspect_ratio=='1.18'),]$aspect_ratio <- NA
+evaluation.new[which(evaluation.new$language %in% c('Dzongkha', 'Filipino')),]$language <- NA
+evaluation.new[which(evaluation.new$country %in% c('Dzongkha', 'Filipino')),]$country <- NA
+evaluation.new[-which(evaluation.new$genres %in% c("Adventure|Animation|Comedy|Family|Sport"    
+, "Biography|Drama|History|Romance"              
+, "Adventure|Drama"                              
+, "Action|Adventure|Drama|Sci_Fi|Thriller"       
+, "Action|Animation|Comedy|Family|Sci_Fi"        
+, "Comedy|Horror|Sci_Fi"                         
+,"Adventure|Drama|Fantasy|Romance"              
+, "Action|Adventure|Fantasy|Sci_Fi"              
+, "Action|Adventure|Comedy|Family|Fantasy|Sci_Fi"
+, "Adventure|Comedy|Fantasy"                     
+, "Action|Adventure|Romance|Sci_Fi|Thriller")),]$genres <- NA
+
+pred_1 <- predict(fit_lm_1_mdf,evaluation.new[,-which(names(evaluation.new) %in% c("Index","gross", "movie_title","director_name" , "actor_1_name" ,"actor_2_name" , "actor_3_name" , "plot_keywords",  "movie_imdb_link","cast_total_facebook_likes"))])
+clsdf_1<-data.frame(cbind(evaluation$Index,evaluation$gross,pred_1))
+colnames(clsdf_1)<-c('Index','gross','pred')
+clsdf_1[!is.na(clsdf_1$pred),]
+length(clsdf_1[!is.na(clsdf_1$pred),])/849
 
 ```
 
@@ -492,6 +706,37 @@ data.frame(fit_lm_2.sum$coef[fit_lm_2.sum$coef[,4] <= .05, ])
 
 ```
 
+### outlier test
+```{r}
+outlierTest(fit_lm_2)
+influencePlot(fit_lm_2,col='red',id.n=2)
+```
+
+### update the model by removing the outliers and influential points
+```{r}
+fit_lm_2_mdf <- update(fit_lm_2,subset=c(-1-1231-3077-160-30-79-1803-32-37-94-176))
+#compareCoefs(fit_lm_2, fit_lm_2_mdf)
+```
+
+```{r}
+fit_lm_2_mdf.sum <- summary(fit_lm_2_mdf)
+data.frame(fit_lm_2_mdf.sum$coef[fit_lm_2_mdf.sum$coef[,4] <= .05, ])
+```
+
+## check multillinearity for model II
+
+```{r}
+# extract the variable with significant coefficient
+library(broom)
+lm_model_coefficients <- tidy(fit_lm_2)
+lm_model_coefficients[lm_model_coefficients$p.value<0.05,1]
+
+suppressMessages(suppressWarnings(library(usdm)))
+
+vif(train[,which(names(train) %in%c("num_voted_users", "aspect_ratio1.5" ,"aspect_ratio2", "budget", "director_facebook_likes","actor_1_facebook_likes", "actor_3_facebook_likes","content_ratingR", "color","genres", "director_ave_gross","actor_1_ave_gross", "actor_2_ave_gross", "actor_3_ave_gross","actor_1_num"   ))])
+
+```
+
 ### Pseudo R-squared, LogLikelihood, AIC
 
 ```{r}
@@ -514,27 +759,62 @@ lm_2_null <- lm(gross~1,
 
 ```
 
-## Ordinal Logistic Regression (OLR)
+### prediction
+```{r}
+pred_2 <- predict(fit_lm_2_mdf,evaluation_dummy[,-which(names(evaluation_dummy) %in% 
+                        c("Index","gross","movie_title","plot_keywords","movie_imdb_link","content_rating",  "color", "language","country","genres","aspect_ratio","director_name","actor_1_name","actor_2_name","actor_3_name"))])
+clsdf_2<-data.frame(cbind(evaluation_dummy$Index,evaluation_dummy$gross,pred_2))
+colnames(clsdf_2)<-c('Index','gross','pred')
+
+ggplot(clsdf_2, aes(x=log(clsdf_2$gross), y = log(clsdf_2$pred))) + 
+  geom_point() +
+  xlab('log(gross)')+
+  ylab('log(pred)')+
+  stat_smooth(method = 'lm', aes(colour = 'linear'), se = FALSE,size=1.5) +
+  stat_smooth(method = 'lm', formula = y ~ poly(x,2), aes(colour = 'polynomial'), se= FALSE,size=1.5) +
+  stat_smooth(method = 'nls', formula = y ~ a * log(x) +b, aes(colour = 'logarithmic'), se = FALSE, start = list(a=1,b=1),size=1.5) +
+  stat_smooth(method = 'nls', formula = y ~ a*exp(b *x), aes(colour = 'Exponential'), se = FALSE, start = list(a=1,b=1),size=1.5)+ theme_few(base_size = 20)
+```
+
+## Ordinal Logistic Regression (OLR) - Model III
 
 ###bin the dependent variable to 10 levels
 ```{r}
-hist(movie_mid$gross)
+#hist(movie_mid$gross)
 
 movie_bin<-movie_mid
 movie_bin$Performance <- factor(ifelse(movie_mid$gross > 5*10^8, "10", ifelse(movie_mid$gross > 3*10^8, "9", ifelse(movie_mid$gross > 1*10^8, "8",ifelse(movie_mid$gross > 0.5*10^8, "7",ifelse(movie_mid$gross > 0.25*10^8, "6",ifelse(movie_mid$gross > 0.125*10^8, "5",ifelse(movie_mid$gross > 0.625*10^7,"4",ifelse(movie_mid$gross > 0.3*10^7,"3",ifelse(movie_mid$gross > 0.1*10^7,"2","1"))))))))))
+movie_bin$Performance <- ordered(movie_bin$Performance,levels = c("1", "2", "3","4","5","6", "7", "8","9","10"))
+
+#hist(movie_mid[which(movie_mid$gross<0.1*10^7),]$gross)
+
+##########################################################################
+# movie_bin_2: bin the DV to 10 bucketsmovie_mid_dummy (without language and country)
+##########################################################################
 
 #names(movie_mid_dummy)
 #dummy code genre
-movie_bin_2 <- movie_bin[,-which(names(movie_bin)%in% c('genres',"aspect_ratio","content_rating"))]
-movie_bin_2 <- cbind(movie_bin,movie_mid_dummy[,c(38:60)])
-movie_bin_2 <- cbind(movie_bin_2,movie_mid_dummy[,c(62:74)])
-movie_bin_2 <- cbind(movie_bin_2,movie_mid_dummy[,c(157:173)])
+movie_bin_2 <- movie_bin[,-which(names(movie_bin)%in% c('genres',"aspect_ratio","content_rating","color"))]
+movie_bin_2 <- cbind(movie_bin,movie_mid_dummy[,c(38:60)]) #genre 
+movie_bin_2 <- cbind(movie_bin_2,movie_mid_dummy[,61]) #color 
+movie_bin_2 <- cbind(movie_bin_2,movie_mid_dummy[,c(62:74)]) #content-rating
+movie_bin_2 <- cbind(movie_bin_2,movie_mid_dummy[,c(157:173)]) #aspect-ratio
+colnames(movie_bin_2)[which(colnames(movie_bin_2)=='movie_mid_dummy[, 61]')] <-'color.Color'
+
+##########################################################################
+# movie_bin_3: bin the DV to 10 bucketsmovie_mid_dummy(with language and country)
+##########################################################################
+movie_bin_3 <- movie_bin_2[,-which(names(movie_bin_2)%in% c("language","country"))]
+movie_bin_3 <- cbind(movie_bin_2,movie_mid_dummy[,c(75:115)])  #language
+movie_bin_3 <- cbind(movie_bin_3,movie_mid_dummy[,c(116:156)]) #country
+
 
 sta_buket<- data.frame(table(movie_bin$Performance))
 colnames(sta_buket)[1] <- 'Levels'
 sta_buket[c(1,3:10,2),]
 
 anyNA(movie_bin_2)
+anyNA(movie_bin_3)
 ```
 
 ##split the data
@@ -572,44 +852,93 @@ train_bin_2 <- movie_bin_2[-indexes,]
 #evaluation <-movie[-train.rows,]  
 anyNA(train_bin_2)
 
+####################################################
+# movie_bin_3
+####################################################
+set.seed(125)
+indexes <- sample(1:nrow(movie_bin), size=0.2*nrow(movie_bin))
+ 
+# Split data into two part, train for building model and evaluation for 
+evaluation_bin_3 <- movie_bin_3[indexes,]
+train_bin_3 <- movie_bin_3[-indexes,]
+
+#train.rows <- createDataPartition(y=movie$Index, p=0.8, list = FALSE)   # caret package
+#train <- movie[train.rows,]  
+#evaluation <-movie[-train.rows,]  
+anyNA(train_bin_3)
+
+buskets <- as.data.frame(cbind(table(evaluation_bin$Performance),'Class'=seq(1,10),'Range'= c("0~1m", "1m~3m", "3m~6.25m","6.25m~12.5m","12.5m~25m","25m~50m","50m~100m", "100m~300m","300m~500m", "500m+")))
+colnames(buskets)[1] <- c('Frequancy')
+(buskets<-buskets[,c(2,3,1)])
+sum(as.numeric(as.character(buskets[,3])))
 ```
 
-```{r}
+
+```{r,echo=F,eval=F}
 
 library(VGAM)
-## Without proportional odds assumptions
-train_bin_2$Performance <- ordered(train_bin_2$Performance)
-evaluation_bin_2$Performance <- ordered(evaluation_bin_2$Performance)
 
-dif <- setdiff(names(train_bin_2) , strsplit("num_voted_users+num_user_for_reviews+num_critic_for_reviews+imdb_score+facenumber_in_poster+budget+title_year+director_facebook_likes+actor_1_facebook_likes+actor_2_facebook_likes+actor_3_facebook_likes+cast_total_facebook_likes+movie_facebook_likes+director_ave_gross+actor_1_ave_gross+actor_2_ave_gross+actor_3_ave_gross+director_num+actor_1_num+actor_2_num+actor_3_num+genre.Action+genre.Adventure+genre.Fantasy+genre.Sci_Fi+genre.Thriller+genre.Romance+genre.Animation+genre.Comedy+genre.Family+genre.Musical+genre.Mystery+genre.Western+genre.Drama+genre.History+genre.Sport+genre.Crime+genre.Horror+genre.War+genre.Biography+genre.Music+genre.Documentary+aspect1.33+aspect1.37+aspect1.44+aspect1.5+aspect1.66+aspect1.85+aspect2+aspect2.2+aspect2.35+aspect2.76+content_ratingApproved+content_ratingG+content_ratingM+content_ratingNC_17+content_ratingPG+content_ratingPG_13+content_ratingR+content_ratingX, train_bin_2","\\+")[[1]])
-dif <- dif[-which(dif %in% c('Performance'))]
+sub <- train_bin_2[,-which(names(train_bin_2) %in% c("Index","gross","duration","imdb_score","movie_title","director_name", "actor_1_name","actor_2_name", "actor_3_name", "plot_keywords","movie_imdb_link", "language", "country","color", "genres","content_rating","aspect_ratio"))] #
 
-sub_ml <-train_bin_2[,-which(names(train_bin_2) %in% c(dif))]
-sub_eva_ml <-train_bin_2[,-which(names(evaluation_bin_2) %in%c(dif))]
+## With nonproportional odds assumptions
+fit_vglm <- vglm(Performance ~ ., sub, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
 
-#sub_eva_ml <-train_bin_2[,-which(names(evaluation_bin_2) %in% c("Index","duration","genre.News","genre.Short", "aspect_ratio" , "gross","movie_title","content_rating" ,"language","director_name", "actor_1_name","actor_2_name" , "actor_3_name","genres","plot_keywords" , "movie_imdb_link" , "content_ratingTV_MA", "content_ratingUnrated", "content_ratingTV_PG","content_ratingGP","content_ratingPassed","aspect1.75","aspect1.77","aspect1.78","aspect2.24","aspect2.39","aspect2.4","aspect2.55"))]
+## With proportional odds assumptions
+fit_vglm <- vglm(Performance ~ ., sub, family = cumulative(link = "logit", parallel = TRUE, reverse = TRUE))
+
+
+```
+
+
+```{r}
+suppressMessages(suppressWarnings(library(VGAM)))
+
+
+dif <- setdiff(names(train_bin_2) , strsplit("Index+movie_title+director_name+actor_1_name+actor_2_name+actor_3_name+plot_keywords+movie_imdb_link+gross+imdb_score+language+country+genres+aspect_ratio+content_rating+genre.News+genre.Short+content_ratingTV_MA+content_ratingTV_PG+content_ratingGP+content_ratingM+content_ratingPassed+content_ratingx+content_ratingpassed+content_ratingNC_17+aspect1.44+aspect1.5+aspect1.75+aspect1.77+aspect2.24+aspect2.4+aspect2.55+aspect2.76+duration+color","\\+")[[1]])
+
+sub_ml <-train_bin_2[,which(names(train_bin_2) %in% c(dif))]
+sub_eva_ml <- evaluation_bin_2[,which(names(evaluation_bin_2) %in%c(dif))]
 
 
 ## With nonproportional odds assumptions
 fit_vglm <-
  vglm(Performance ~  ., sub_ml, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
 
+## With proportional odds assumptions
+fit_vglm_p <-
+ vglm(Performance ~  ., sub_ml, family = cumulative(link = "logit", parallel = TRUE, reverse = TRUE))
 
-#sub_ml <-train_bin_2[,-which(names(train_bin_2) %in% c("Index","gross","movie_title", "plot_keywords" , "movie_imdb_link","director_name", "actor_1_name", "actor_2_name", "actor_3_name", "language", "country", "genres","content_rating","aspect_ratio",  "genre.Sci-Fi" ,"genre.News","genre.Short","num_critic_for_reviews","num_voted_users","imdb_score","facenumber_in_poster","duration","title_year","content_ratingM","content_ratingGP","content_ratingNC-17","content_ratingNot Rated","content_ratingPassed","content_ratingPG-13","content_ratingTV-MA","content_ratingTV-PG","content_ratingX","aspect1.75","aspect1.77","aspect1.78","aspect2.24","aspect2.39","aspect2.4","aspect2.55" ))]
+#depvar(fit_vglm)
+#coef(fit_vglm, matrix = TRUE)
 
-## With nonproportional odds assumptions
-#fit_vglm <- vglm(Performance ~  ., sub_ml, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
 
 #xfit_vglm <- vglm(Performance ~  num_user_for_reviews+budget+director_facebook_likes+actor_1_facebook_likes+actor_2_facebook_likes+actor_3_facebook_likes+cast_total_facebook_likes+movie_facebook_likes+color+director_ave_gross+actor_1_ave_gross+actor_2_ave_gross+actor_3_ave_gross+director_num+actor_1_num+actor_2_num+actor_3_num+genre.Action+genre.Adventure+genre.Fantasy+genre.Thriller+genre.Romance+genre.Animation+genre.Comedy+genre.Family+genre.Musical+genre.Mystery+genre.Western+genre.Drama+genre.History+genre.Sport+genre.Crime+genre.Horror+genre.War+genre.Biography+genre.Music+genre.Documentary+content_ratingApproved+content_ratingG+content_ratingPG+content_ratingR+aspect1.33+aspect1.37+aspect1.44+aspect1.5+aspect1.66+aspect1.85+aspect2+aspect2.2+aspect2.35+aspect2.76, sub_ml, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
 
 
 #fit_vglm <- vglm(Performance ~  num_voted_users+budget+title_year+director_facebook_likes+actor_1_facebook_likes+actor_2_facebook_likes+actor_3_facebook_likes+cast_total_facebook_likes+movie_facebook_likes+color+director_ave_gross+actor_1_ave_gross+actor_2_ave_gross+actor_3_ave_gross+director_num+actor_1_num+actor_2_num+actor_3_num+genre.Action+genre.Adventure+genre.Fantasy+genre.Sci_Fi+genre.Thriller+genre.Romance+genre.Animation+genre.Comedy+genre.Family+genre.Musical+genre.Mystery+genre.Western+genre.Drama+genre.History+genre.Sport+genre.Crime+genre.Horror+genre.War+genre.Biography+genre.Music+genre.Documentary+genre.News+genre.Short+content_ratingApproved+content_ratingG+content_ratingGP+content_ratingM+content_ratingNC_17+content_ratingPassed+content_ratingPG+content_ratingPG_13+content_ratingR+content_ratingTV_MA+content_ratingTV_PG+content_ratingUnrated+content_ratingX+aspect1.33+aspect1.37+aspect1.44+aspect1.5+aspect1.66+aspect1.75+aspect1.77+aspect1.78+aspect1.85+aspect2+aspect2.2+aspect2.24+aspect2.35+aspect2.39+aspect2.4+aspect2.55+aspect2.76, train_bin_2, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
 
+#fit_vglm <- vglm(Performance ~  num_user_for_reviews+num_critic_for_reviews+imdb_score+num_voted_users+facenumber_in_poster+budget+title_year+director_facebook_likes+duration+actor_1_facebook_likes+actor_2_facebook_likes+actor_3_facebook_likes+cast_total_facebook_likes+movie_facebook_likes+director_ave_gross+actor_1_ave_gross+actor_2_ave_gross+actor_3_ave_gross+director_num+actor_1_num+actor_2_num+actor_3_num+genre.Action+genre.Adventure+genre.Fantasy+genre.Sci_Fi+genre.Thriller+genre.Romance+genre.Animation+genre.Comedy+genre.Family+genre.Musical+genre.Mystery+genre.Western+genre.Drama+genre.History+genre.Sport+genre.Crime+genre.Horror+genre.War+genre.Biography+genre.Music+genre.Documentary+color.Color+content_ratingApproved+content_ratingG+content_ratingPG+content_ratingUnrated+content_ratingPG_13+content_ratingR+content_ratingX+content_ratingNC_17+aspect1.33+aspect1.37+aspect1.66+aspect1.78+aspect1.85+aspect2+aspect2.2+aspect2.35+aspect2.39, train_bin_2, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
 
-#fit_vglm <- vglm(Performance ~ num_voted_users+num_user_for_reviews+num_critic_for_reviews+imdb_score+facenumber_in_poster+budget+title_year+director_facebook_likes+actor_1_facebook_likes+actor_2_facebook_likes+actor_3_facebook_likes+cast_total_facebook_likes+movie_facebook_likes+director_ave_gross+actor_1_ave_gross+actor_2_ave_gross+actor_3_ave_gross+director_num+actor_1_num+actor_2_num+actor_3_num+genre.Action+genre.Adventure+genre.Fantasy+genre.Sci_Fi+genre.Thriller+genre.Romance+genre.Animation+genre.Comedy+genre.Family+genre.Musical+genre.Mystery+genre.Western+genre.Drama+genre.History+genre.Sport+genre.Crime+genre.Horror+genre.War+genre.Biography+genre.Music+genre.Documentary+aspect1.33+aspect1.37+aspect1.44+aspect1.5+aspect1.66+aspect1.85+aspect2+aspect2.2+aspect2.35+aspect2.76+content_ratingApproved+content_ratingG+content_ratingM+content_ratingNC_17+content_ratingPG+content_ratingPG_13+content_ratingR+content_ratingX, train_bin_2, family = cumulative(link = "logit", parallel = FALSE, reverse = TRUE))
+#num_coef_vglm <- coef(summary(fit_vglm))[coef(summary(fit_vglm))[,4]<0.05,4]
+
+```
+
+### Check the proportional odds assumption with a LRT
+```{r}
+lrtest(fit_vglm, fit_vglm_p)
+
+```
 
 
-
+###diagnostic
+```{r,eval=F,echo=F}
+library(sure)
+autoplot.vglm(fit_vglm, what = c("qq", "fitted", "covariate"), x = NULL,
+  alpha = 1, xlab = NULL, color = "#444444", shape = 19, size = 2,
+  qqpoint.color = "#444444", qqpoint.shape = 19, qqpoint.size = 2,
+  qqline.color = "#888888", qqline.linetype = "dashed", qqline.size = 1,
+  smooth = TRUE, smooth.color = "red", smooth.linetype = 1,
+  smooth.size = 1, fill = NULL)
 
 ```
 
@@ -636,7 +965,9 @@ p_R2_3 <- 1- logLik_3/logLik_3_null
 ###predict the gross in test data
 
 ```{r}
-
+######################################################
+#predic with non-proportional odds model
+######################################################
 pred_3 <- predictvglm(fit_vglm, newdata = sub_eva_ml[,-which(names(sub_eva_ml) %in% 
                                                                c("Performance"))],
             type = "response",
@@ -644,10 +975,11 @@ pred_3 <- predictvglm(fit_vglm, newdata = sub_eva_ml[,-which(names(sub_eva_ml) %
             untransform = FALSE,
             type.fitted = NULL, percentiles = NULL)
 
-clsdf_3 <- data.frame(cbind('Index'=train_bin_2$Index,'Pred.prob'=apply(pred_3,1,max),'Pred'=colnames(pred_3)[max.col(pred_3,ties.method="first")], sub_eva_ml$Performance))
+clsdf_3 <- data.frame(cbind('Index'=evaluation_bin_2$Index,'Pred.prob'=apply(pred_3,1,max),'Pred'=colnames(pred_3)[max.col(pred_3,ties.method="first")], sub_eva_ml$Performance))
 colnames(clsdf_3)[4]<-'Performance'
+clsdf_3$Performance <- ordered(clsdf_3$Performance,levels=c("1", "2", "3","4","5","6", "7", "8","9","10"))
 
-
+#or 'Pred'=apply(fitted(fit_vglm), 1, which.max) 
 
 suppressMessages(suppressWarnings(library(caret)))
 cfmx_3 <- confusionMatrix(data = clsdf_3$Pred, reference = clsdf_3$Performance, positive = "1")
@@ -658,26 +990,49 @@ cfmx_3
 (acrcy_3 <- cfmx_3$overall['Accuracy'])
 (err_rate_3 <- 1-cfmx_3$overall['Accuracy'])
 
-
+data.frame(t(cfmx_3$byClass))
 ```
 
+
+
+## Random Forest Model - Model IV
 
 ```{r}
 
 library(randomForest)
+# randomForest can not handle categorical predictors with more than 53 categories.
 
+########################################################################
+#RF model-1
+########################################################################
+# for "aspect_ratio", "content_rating" , "color",  and "genres",  only use dummy variable
+# drop factors with to many levels:"movie_title","director_name","actor_1_name", "actor_2_name","actor_3_name", "plot_keywords" , "movie_imdb_link",  "language" ,"country"
 set.seed(100)
-
-fit_rf <- randomForest(Performance ~ . , data = train_bin_2[,-which(names(train_bin_2)%in%c("Index","aspect_ratio", "movie_title","content_rating"  , "language" ,"country" , "director_name","actor_1_name", "actor_2_name","actor_3_name",      "genres" , "plot_keywords" , "movie_imdb_link"))] , importance=TRUE, ntree=2000)
+fit_rf <- randomForest(Performance ~ . , data = train_bin_2[,-which(names(train_bin_2)%in%c("Index","gross","aspect_ratio", "movie_title","content_rating" , "color", "language" ,"country" , "director_name","actor_1_name", "actor_2_name","actor_3_name",  "genres" , "plot_keywords" , "movie_imdb_link"))] , importance=TRUE, ntree=2000)
 
 varImpPlot(fit_rf)
+
+########################################################################
+#RF model-2
+########################################################################
+# keep "aspect_ratio", "content_rating" , "color", but not use dummy variable
+# keep "genres","language" and "country" but in dummy format
+# drop factors with to many levels:"movie_title","director_name","actor_1_name", "actor_2_name","actor_3_name", "plot_keywords" , "movie_imdb_link" 
+set.seed(101)
+sub_rf <- train_bin_3[,-c(62:92)]
+fit_rf_2 <- randomForest(Performance ~ . , data = sub_rf[,-which(names(sub_rf)%in%c("Index","gross","movie_title","language", "country" ,"director_name","actor_1_name", "actor_2_name","actor_3_name",  "genres", "plot_keywords" , "movie_imdb_link"))] , importance=TRUE, ntree=2000)
+
+varImpPlot(fit_rf_2)
+
 ```
+
 
 ```{r}
 
-pred_4 <- predict(fit_rf,evaluation_bin_2[,-which(names(train_bin_2)%in%c("Performance","Index","aspect_ratio", "movie_title","content_rating"  , "language" ,"country" , "director_name","actor_1_name", "actor_2_name","actor_3_name",      "genres" , "plot_keywords" , "movie_imdb_link"))] , type="response", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+pred_4 <- predict(fit_rf,evaluation_bin_2[,-which(names(evaluation_bin_2)%in%c("Performance","Index","gross","aspect_ratio", "movie_title","content_rating"  ,"color", "language" ,"country" , "director_name","actor_1_name", "actor_2_name","actor_3_name",      "genres" , "plot_keywords" , "movie_imdb_link"))] , type="response", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
 
-clsdf_4 <- data.frame(cbind('Index'=train_bin_2$Index,'Pred'=pred_4, sub_eva_ml$Performance))
+
+clsdf_4 <- data.frame(cbind('Index'=evaluation_bin_2$Index,'Pred'=pred_4, evaluation_bin_2$Performance))
 colnames(clsdf_4)[3]<-'Performance'
 
 cfmx_4 <- confusionMatrix(data = clsdf_4$Pred, reference = clsdf_4$Performance, positive = "1")
@@ -688,7 +1043,325 @@ cfmx_4
 (acrcy_4 <- cfmx_4$overall['Accuracy'])
 (err_rate_4 <- 1-cfmx_4$overall['Accuracy'])
 
+data.frame(t(cfmx_4$byClass))
+
+########################################################################
+#RF model-2
+########################################################################
+sub_rf <- evaluation_bin_3[,-c(62:92)]
+pred_rf2 <- predict(fit_rf_2,sub_rf[,-which(names(sub_rf)%in%c("Performance","Index","gross","movie_title", "language", "country" ,"director_name","actor_1_name", "actor_2_name","actor_3_name",  "genres", "plot_keywords" , "movie_imdb_link"))] , type="response", norm.votes=TRUE, predict.all=FALSE, proximity=FALSE, nodes=FALSE)
+
+clsdf_rf2 <- data.frame(cbind('Index'=evaluation_bin_2$Index,'Pred'=pred_rf2, evaluation_bin_2$Performance))
+colnames(clsdf_rf2)[3]<-'Performance'
+
+cfmx_rf2 <- confusionMatrix(data = clsdf_rf2$Pred, reference = clsdf_rf2$Performance, positive = "1")
+
+cfmx_rf2
+
+(kappa_rf2 <- cfmx_rf2$overall['Kappa'])
+(acrcy_rf2 <- cfmx_rf2$overall['Accuracy'])
+(err_rate_rf2 <- 1-cfmx_rf2$overall['Accuracy'])
+
+ 
+data.frame(t(cfmx_rf2$byClass))
 
 ```
 
 
+
+
+## Generalized Linear Models with L1 Penalty - Model V
+
+
+```{r }
+sub <- train_bin_2[,-which(names(train_bin_2) %in% c("Index","gross","movie_title","director_name", "actor_1_name","actor_2_name", "actor_3_name", "plot_keywords","movie_imdb_link", "color", "language", "country","genres","content_rating","aspect_ratio"))]
+
+library(glmpathcr)
+
+x <- sub[, -which(names(sub)%in% c("Performance"))]
+y <- sub$Performance
+
+fit_glmpath <- glmpathcr(x,y)
+
+BIC.step <- model.select(fit_glmpath, which = "BIC")
+AIC.step <- model.select(fit_glmpath, which = "AIC")
+coefficients<-coef(fit_glmpath, s=AIC.step)
+nonzero.coef(fit_glmpath, s=AIC.step)
+pred <- predict(fit_glmpath,which = "AIC", type = "class")
+confusion <- table(pred, y)
+
+accuracy_glmpath <- data.frame('class'=rownames(table(pred, y)),'accuracy'=rep(0,length(unique(pred))))
+for(i in 1:length(unique(pred))){
+  ac <- table(pred, y)[i,which(rownames(table(pred, y))[i]==colnames(table(pred, y)))]/sum(table(pred, y)[i,])
+  accuracy_glmpath[i,2]<-ac
+}
+accuracy_glmpath
+
+sub_ev <- evaluation_bin_2[,-which(names(evaluation_bin_2) %in% c("Index","gross","movie_title","director_name", "actor_1_name","actor_2_name", "actor_3_name", "plot_keywords","movie_imdb_link", "color", "language", "country","genres","content_rating","aspect_ratio"))]
+
+```
+
+### prediction
+```{r}
+pred_5 <- predict(fit_glmpath,newx = sub_ev[,-which(names(sub_ev)=='Performance')], which = "AIC", type = "class")
+clsdf_5 <- as.data.frame(cbind(evaluation_bin_2$Index,sub_ev$Performance,pred_5))
+colnames(clsdf_5) <- c('Index','Performance',"Pred" )
+clsdf_5$Pred <- ordered(clsdf_5$Pred,levels(clsdf_5$Pred)[c(1,3:7,2)])
+clsdf_5$Performance <- ordered(clsdf_5$Performance,levels=c("1", "2", "3","4","5","6", "7", "8","9","10"))
+
+cfmx_5_v1 <- table(pred_5, sub_ev$Performance)
+#or
+cfmx_5 <- confusionMatrix(data = clsdf_5$Pred, reference = clsdf_5$Performance, positive = "1")
+
+cfmx_5
+
+(kappa_5 <- cfmx_5$overall['Kappa'])
+(acrcy_5 <- cfmx_5$overall['Accuracy'])
+(err_rate_5 <- 1-cfmx_5$overall['Accuracy'])
+
+data.frame(t(cfmx_5$byClass))
+
+
+accuracy_glmpath_ev <- data.frame('class'=rownames(table(pred_5, sub_ev$Performance)),'accuracy'=rep(0,length(unique(pred_5))))
+for(i in 1:length(unique(pred_5))){
+  ac <- cfmx_5_v1[i,which(rownames(cfmx_5_v1)[i]==colnames(cfmx_5_v1))]/sum(cfmx_5_v1[i,])
+  accuracy_glmpath_ev[i,2]<-ac
+}
+
+accuracy_glmpath_ev
+```
+
+## Classification Trees - Model VI
+
+```{r}
+library(rpartScore)
+
+#use the same subset as random forest model 1
+train_bin_2_rp <- train_bin_2
+train_bin_2_rp$Performance <- as.numeric(as.character(train_bin_2_rp$Performance))
+fit_rpartScore <- rpartScore(Performance ~ ., data = train_bin_2_rp[,-which(names(train_bin_2_rp)%in%c("Index","gross","aspect_ratio", "movie_title","content_rating"  ,"color", "language" ,"country" , "director_name","actor_1_name", "actor_2_name","actor_3_name",      "genres" , "plot_keywords" , "movie_imdb_link"))],split = "quad", prune = "mr")
+
+#fit_rpart <- rpart (fit_rpartScore)
+
+plotcp(fit_rpartScore)
+
+#fit_rpartScore.pruned<-prune(fit_rpartScore,cp=0.02)
+#par(mar=c(0.5,0,0.5,0))
+#plot(fit_rpartScore.pruned)
+#text(fit_rpartScore.pruned,cex=0.8,srt = 0)
+
+#T.quad.mr <- rpartScore(Performance ~ ., data = train_bin_2_rp[,-which(names(train_bin_2_rp)%in%c("Index","gross","aspect_ratio", "movie_title","content_rating" , "color", "language" ,"country" , "director_name","actor_1_name", "actor_2_name","actor_3_name",  "genres" , "plot_keywords" , "movie_imdb_link"))], split = "quad", prune = "mr")
+
+xerror.min.pos <- which.min(fit_rpartScore$cptable[, 4])
+th.1std.rule <- fit_rpartScore$cptable[xerror.min.pos, 4] +
+fit_rpartScore$cptable[xerror.min.pos, 5]
+best.1std.rule <- which.max(fit_rpartScore$cptable[, 4] < th.1std.rule)
+best.1std.rule.cp <- fit_rpartScore$cptable[best.1std.rule, 1]
+fit_rpartScore.best <- prune(fit_rpartScore, cp = best.1std.rule.cp)
+
+par(mar=c(0.5,0,0.5,0))
+plot(fit_rpartScore.best)
+text(fit_rpartScore.best,cex=0.8,srt = 0)
+
+```
+
+###prediction
+```{r}
+pred_6  <- predict(fit_rpartScore.best, newdata = evaluation_bin_2[,-which(names(evaluation_bin_2)%in%c("Performance","Index","gross","aspect_ratio", "movie_title","content_rating"  ,"color", "language" ,"country" , "director_name","actor_1_name", "actor_2_name","actor_3_name", "genres" , "plot_keywords" , "movie_imdb_link"))])
+
+#pred_7  <- predict(fit_rpart , newdata = evaluation_bin_2[,-which(names(evaluation_bin_2)%in%c("Performance","Index","gross","aspect_ratio", "movie_title","content_rating"  ,"color", "language" ,"country" , "director_name","actor_1_name", "actor_2_name","actor_3_name", "genres" , "plot_keywords" , "movie_imdb_link"))],type='class')
+
+clsdf_6 <- as.data.frame(cbind(evaluation_bin_2$Index,evaluation_bin_2$Performance,pred_6))
+colnames(clsdf_6) <- c('Index','Performance',"Pred" )
+cfmx_6_v1 <- table(pred_6, sub_ev$Performance)
+#or
+cfmx_6 <- confusionMatrix(data = clsdf_6$Pred, reference = clsdf_6$Performance, positive = "1")
+
+cfmx_6
+
+(kappa_6 <- cfmx_6$overall['Kappa'])
+(acrcy_6 <- cfmx_6$overall['Accuracy'])
+(err_rate_6 <- 1-cfmx_6$overall['Accuracy'])
+
+data.frame(t(cfmx_6$byClass))
+
+```
+
+
+```{r}
+
+library("ggfortify")
+
+
+#library(caret)
+#plot(cfmx_4$table)
+#plot(cfmx_5$table)
+
+# Generated palette with rich rainbow and dark (12, s = 0.6, v = 0.75)
+richcolor <- c("#000041", "#FF3300", "#0081FF",  "#80FE1A", "#FDEE02", "#FFAB00" )
+clsdf_2 <- as.data.frame(clsdf_2)
+qplot(x=log(clsdf_2$gross), y = log(clsdf_2$pred),main='Multiple Linear Regression', data=clsdf_2,xlab='log(gross)',ylab='log(pred)') +
+  geom_smooth(method = "glm", formula = y~x, family = gaussian(link = 'log'))+
+  theme_few(base_size = 20)
+
+clsdf_3_plot <- clsdf_3
+par(cex.axis=1, cex.lab=2, cex.main=3, cex.sub=3)
+qplot( Performance,  Pred, data=clsdf_3_plot,  colour= Performance, geom = c("boxplot", "jitter"), main = "Ordinal Logistic Regression", xlab = "Observed Classe", ylab = "Predicted Classe",scale_color_manual(values = richcolor)) + theme_grey(base_size = 16.5) 
+ 
+clsdf_4_plot <- clsdf_4
+clsdf_4_plot[,2] <- ordered(clsdf_4_plot[,2],levels=c("1", "2", "3","4","5","6", "7", "8","9","10"))
+clsdf_4_plot[,3] <- ordered(clsdf_4_plot[,3],levels=c("1", "2", "3","4","5","6", "7", "8","9","10"))
+qplot( Performance,  Pred, data=clsdf_4_plot,  colour= Performance, geom = c("boxplot", "jitter"), main = "Random Forest", xlab = "Observed Classe", ylab = "Predicted Classe",scale_color_manual(values = richcolor))+ theme_grey(base_size = 16.5)
+
+clsdf_rf2_plot <- clsdf_rf2
+clsdf_rf2_plot[,2] <- ordered(clsdf_rf2_plot[,2],levels=c("1", "2", "3","4","5","6", "7", "8","9","10"))
+clsdf_rf2_plot[,3] <- ordered(clsdf_rf2_plot[,3],levels=c("1", "2", "3","4","5","6", "7", "8","9","10"))
+qplot( Performance,  Pred, data=clsdf_rf2_plot,  colour= Performance, geom = c("boxplot", "jitter"), main = "Random Forest_based on dummy variable", xlab = "Observed Classe", ylab = "Predicted Classe",scale_color_manual(values = richcolor))+ theme_grey(base_size = 16.5)
+
+clsdf_5_plot <- clsdf_5
+qplot( Performance,  Pred, data=clsdf_5_plot,  colour= Performance, geom = c("boxplot", "jitter"), main = "Generalized Linear Models with L1 Penalty", xlab = "Observed Classe", ylab = "Predicted Classe",scale_color_manual(values = richcolor))+ theme_grey(base_size = 16.5)
+
+clsdf_6_plot <- clsdf_6
+clsdf_6_plot[,2] <- ordered(clsdf_6_plot[,2],levels=c("1", "2", "3","4","5","6", "7", "8","9","10"))
+clsdf_6_plot[,3] <- ordered(clsdf_6_plot[,3],levels=c("1", "2", "3","4","5","6", "7", "8","9","10"))
+qplot( Performance,  Pred, data=clsdf_6_plot,  colour= Performance, geom = c("boxplot", "jitter"), main = "Classification Trees", xlab = "Observed Classe", ylab = "Predicted Classe",scale_color_manual(values = richcolor))+ theme_grey(base_size = 16.5)
+
+table(clsdf_3$Performance)
+
+# or
+#ggplot(as.data.frame(cfmx_4$table)) +
+#  geom_tile(aes(x=Prediction, y=Reference, fill=Freq)) + scale_x_discrete(name="Actual Class") + scale_y_discrete(name="Predicted Class") + scale_fill_gradient(breaks=seq(from=-.5, to=4, by=.2)) + labs(fill="Normalized\nFrequency") 
+
+```
+
+##metrics
+```{r}
+R2 <- format(c(p_R2_1,p_R2_2))
+Loglik <- format(c(logLik_1,logLik_2))
+AICs<-format(c(AIC_1,AIC_2))
+data.frame(cbind('Model'=c('Multiple Linear Regression','Multiple Linear Regression - dummy encode predictor'),'R_squared'=R2, 'LogLike'=Loglik,'AIC'=AICs,'variable'=c(53,21)))
+
+acc <- format(c(acrcy_3,acrcy_4,acrcy_5,acrcy_6))
+err <- format(c(err_rate_3,err_rate_4,err_rate_5,err_rate_6))
+kapa <- format(c(kappa_3,kappa_4,kappa_5,kappa_6))
+data.frame(cbind('Ordinal Classification Model'=c('Ordinal Logistic Regression (OLR)','Random Forest','Generalized Linear Models with L1 Penalty',' Classification Trees'),'Accuracy'=acc, 'Error.Rate'=err,'Kappa'=kapa))
+
+length(pred_1[!is.na(pred_1)])
+
+```
+
+
+
+
+
+
+```{r,echo=F,eval=F}
+
+library(rpartScore)
+
+data("birthwt",package="MASS")
+
+birthwt$Category.s <- ifelse(birthwt$bwt <= 2500, 3,
+ 	ifelse(birthwt$bwt <= 3000, 2,
+ 	ifelse(birthwt$bwt <= 3500, 1, 0)))
+
+T.abs.mc <- rpartScore(Category.s ~ age + lwt + race + smoke +
+ 	ptl + ht + ui + ftv, data = birthwt)
+
+plotcp(T.abs.mc)
+
+T.abs.mc.pruned<-prune(T.abs.mc,cp=0.02)
+
+plot(T.abs.mc.pruned)
+
+text(T.abs.mc.pruned)
+ 
+T.abs.mr <- rpartScore(Category.s ~ age + lwt + race + smoke +
+ 	ptl + ht + ui + ftv, data = birthwt, prune = "mr")
+
+T.quad.mc <- rpartScore(Category.s ~ age + lwt + race + smoke + 
+ 	ptl + ht + ui + ftv, split = "quad", data = birthwt)
+
+T.quad.mr <- rpartScore(Category.s ~ age + lwt + race + smoke + ptl + ht + 
+ 	ui + ftv, split = "quad", prune = "mr", data = birthwt)
+```
+
+
+
+```{r,eval=F,echo=F}
+pneumo <- transform(pneumo, let = log(exposure.time))
+(fit <- vglm(cbind(normal, mild, severe) ~ let,
+             cumulative(parallel = TRUE, reverse = TRUE), data = pneumo))
+(fit.null <- vglm(cbind(normal, mild, severe) ~ 1,
+             cumulative(parallel = TRUE, reverse = TRUE), data = pneumo))
+(p_R2_example <- 1 - deviance(fit) / deviance(fit.null))
+depvar(fit)  # Sample proportions (good technique)
+fit@y
+weights(fit, type = "prior")  # Number of observations
+coef(fit, matrix = TRUE)
+
+#significant coef
+coef(summary(fit))[coef(summary(fit))[,4]<0.05,4]
+
+constraints(fit)  # Constraint matrices
+apply(fitted(fit), 1, which.max)  # Classification
+apply(predict(fit, newdata = pneumo, type = "response"),
+      1, which.max)  
+
+# Check that the model is linear in let ----------------------
+fit2 <- vgam(cbind(normal, mild, severe) ~ s(let, df = 2),
+             cumulative(reverse = TRUE), data = pneumo)
+plot(fit2, se = TRUE, overlay = TRUE, lcol = 1:2, scol = 1:2) 
+
+# Check the proportional odds assumption with a LRT ----------
+(fit3 <- vglm(cbind(normal, mild, severe) ~ let,
+              cumulative(parallel = FALSE, reverse = TRUE), data = pneumo))
+pchisq(2 * (logLik(fit3) - logLik(fit)),
+       df = length(coef(fit3)) - length(coef(fit)), lower.tail = FALSE)
+lrtest(fit3, fit)# More elegant
+
+```
+
+```{r,echo=F,eval=F}
+
+library(glmpathcr)
+data(diabetes)
+diabetes <- diabetes[c(1,9,16,1:8,10:15,17:24),]
+diabetes <- rbind(diabetes,diabetes)
+x <- diabetes[, 2:dim(diabetes)[2]]
+y <- diabetes$y
+fit_glmpath <- glmpathcr(x,y)
+BIC.step <- model.select(fit_glmpath, which = "BIC")
+AIC.step <- model.select(fit_glmpath, which = "AIC")
+coefficients<-coef(fit, s=BIC.step)
+nonzero.coef(fit_glmpath, s=BIC.step)
+pred <- predict(fit_glmpath)
+table(pred, y)
+```
+
+
+```{r,echo=F,eval=F}
+
+
+library("ggfortify")
+
+
+library(cluster)
+autoplot(pam(iris[-5], 4), frame = TRUE, frame.type = 'norm')
+
+
+library(klaR)
+rdaFit <- train(Species ~ .,
+                data = iris, 
+                method = "rda", 
+                control = trainControl(method = "cv"))
+plot(rdaFit)
+plot(rdaFit, plotType = "level")
+
+ggplot(rdaFit) + theme_bw()
+
+df_pca <- prcomp(iris[,-5])
+
+df_pca$x[,2]
+
+```
